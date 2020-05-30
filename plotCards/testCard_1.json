@@ -1,0 +1,70 @@
+{
+    "variables": 
+    {
+        "dipho_pt":
+        { 
+            "range"    : "(0,300)",
+            "num_bins" : "25",
+            "cuts"     : "dipho_pt>10 and dipho_pt<300",
+            "xlabel"   : "$p_{T}^{#mathrm{ee}$",
+            "norm"     : false,
+            "log"      : true,
+            "ratio"    : false,
+            "lumi"     : "59.7",
+            "colour"   : "red"
+        },  
+        "dipho_mass":
+        {   
+            "range"    : "(80,150)",
+            "num_bins" : "40",
+            "cuts"     : "",
+            "xlabel"   : "$m_{#mathrm{ee}}$",
+            "norm"     : true,
+            "log"      : false,
+            "ratio"    : true,
+            "lumi"     : "59.7",
+            "colour"   : "blue"
+        }
+    },
+    "samples":
+    {
+        "DYMC_2016_PAS5":
+        {
+            "tree"          : "vbfTagDumper/trees/zee_13TeV_GeneralDipho",
+            "file_path"     : "/vols/cms/jwd18/Stage1categorisation/Pass1/2016/trees/",
+            "year"          : "2016",
+            "lumi"          : "37.1",
+            "file_ext"      : ".root",
+            "sample_set"    : "DYMC",
+            "label"         : "background"
+        },
+        "DYMC_2017_PAS5":
+        {
+            "tree"          : "vbfTagDumper/trees/zee_13TeV_GeneralDipho",
+            "file_path"     : "/vols/cms/jwd18/Stage1categorisation/Pass1/2017/trees/",
+            "year"          : "2017",
+            "lumi"          : "41.5",
+            "file_ext"      : ".root",
+            "sample_set"    : "DYMC",
+            "label"         : "background"
+        }
+    },
+    "systematics": {
+        "JEC": {
+            "up_tree"   : "vbfTagDumper/trees/zee_13TeV_GeneralDipho_JECUp01sigma",
+            "down_tree" : "vbfTagDumper/trees/zee_13TeV_GeneralDipho_JECDown01sigma"
+        },  
+        "JER": {
+            "up_tree"   : "vbfTagDumper/trees/zee_13TeV_GeneralDipho_JERUp01sigma",
+            "down_tree" : "vbfTagDumper/trees/zee_13TeV_GeneralDipho_JERDown01sigma"
+        }   
+    },  
+    "options": 
+    {
+        "ratio_range"   : "(0,2)",
+        "global_label"  : "",
+        "cms_label"     : "Preliminary",
+        "energy_label"  : "13 TeV",
+        "concat_years"  : true
+    }
+}
