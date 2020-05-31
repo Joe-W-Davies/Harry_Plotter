@@ -47,6 +47,26 @@
             "file_ext"      : ".root",
             "sample_set"    : "DYMC",
             "label"         : "background"
+        },
+        "DYData_2016_PAS5":
+        {
+            "tree"          : "vbfTagDumper/trees/Data_13TeV_GeneralDipho",
+            "file_path"     : "/vols/cms/jwd18/Stage1categorisation/Pass1/2016/trees/",
+            "year"          : "2016",
+            "lumi"          : "37.1",
+            "file_ext"      : ".root",
+            "sample_set"    : "Data",
+            "label"         : "data"
+        },
+        "DYData_2017_PAS5":
+        {
+            "tree"          : "vbfTagDumper/trees/Data_13TeV_GeneralDipho",
+            "file_path"     : "/vols/cms/jwd18/Stage1categorisation/Pass1/2017/trees/",
+            "year"          : "2017",
+            "lumi"          : "41.5",
+            "file_ext"      : ".root",
+            "sample_set"    : "Data",
+            "label"         : "data"
         }
     },
     "systematics": {

@@ -70,22 +70,11 @@ class Sample(object):
         self.__dict__.update(options)
         if self.file_path.endswith('/'): self.file_path = self.file_path[:-1]
         self.name     = name
+        self.label    = self.label.lower()
         
     def check_dir(self, file_path):
         if not path.exists(file_path):
           raise ('Error: %s file path not found') %file_path
-        
-    def tree_to_df(self):
-        upr_file = upr.open( self.file_path )
-        upr_tree = trainFile[self.tree]
-        mc_df    = upr_tree.pandas.df(self.var_list)
-        return mc_df
-
-    def concat_frames(self, frame_dict):
-        concat_list = []
-        for proc in frame_dict.iteritems():
-          concat_list.append( frame_dict[proc] )
-        return pd.concat(concat_list)
 
     def scale_to_lumi(self):
         '''
@@ -181,7 +170,7 @@ class Reader(object):
     def __init__(self, card, sample_dir='', output_dir=''):
         self.card          = card 
         self.variables     = {}
-        self.samples       = {}
+        self.samples       = {} #all samples in { key:df } format
         self.systematics   = {}
         self.options       = Options()
         self.ratio_range   = (0,2) #get from options
@@ -192,9 +181,12 @@ class Reader(object):
 
         self.legend        = ['']
         self.var_names     = []
-        self.sample_sets   = set() #unique set of samples name that span years 
+        self.sample_sets   = set() #unique set of name that span years 
         self.sample_years  = set() 
-        self.sample_df_map = {} 
+        self.sample_labels = set() 
+        self.signal_df_map = {} 
+        self.bkg_df_map    = {} 
+        self.data_df_map   = {} 
         self.syst_df_map   = {} 
 
     def read(self):
@@ -229,38 +221,75 @@ class Reader(object):
         The lists will then be concattenated across years i.e. flattened out
         Otherwise just store with one key per sample:
         {'sample_id_1' : df_1, 'sample_id_2' : ..., ...}
+        #Dictionaries are split into signal, background, and Data
         """
 
-        sample_df_map = {}
+        sig_df_map  = {}
+        bkg_df_map  = {}
+        data_df_map = {}
 
         if self.options.concat_years: 
-            for sample_set in self.sample_sets:
-                sample_df_map[sample_set] = []
-         
+            for sample_name, sample_obj in self.samples.iteritems():
+                #dict keys are unique so dont really need nested "if" statement but nice for thinking about it
+                if   sample_obj.label == 'signal'     :
+                    if sample_obj.sample_set not in sig_df_map.keys() : sig_df_map[sample_obj.sample_set]  = [] 
+                elif sample_obj.label == 'background' : 
+                    if sample_obj.sample_set not in bkg_df_map.keys() : bkg_df_map[sample_obj.sample_set]  = []
+                elif sample_obj.label == 'data'       : 
+                    if sample_obj.sample_set not in bkg_df_map.keys() : data_df_map[sample_obj.sample_set] = []
+
+                else: raise Exception ("Got incorrect label '%s', for sample: %s. Accepted labels are: 'signal', 'background', or 'data'" ) % (sample_obj.label, sample_name)
+        
         for sample_name, sample_obj in self.samples.iteritems():
 	    if not path.isdir(sample_obj.file_path): 
               raise Exception('%s directory does not exist!'%sample_obj.file_path)
-
             input_file = upr.open( '%s/%s%s' % (sample_obj.file_path, sample_obj.name, sample_obj.file_ext) )
             input_tree = input_file[sample_obj.tree]
             input_df   = input_tree.pandas.df(self.var_names+['weight'])
-            if sample_obj.label.lower() != 'Data' : input_df['weight']*=float(sample_obj.lumi)
+            if sample_obj.label.lower() != 'data' : input_df['weight']*=float(sample_obj.lumi)
+
             if self.options.concat_years:
-                sample_df_map[sample_obj.sample_set].append(input_df)
+                if sample_obj.label.lower()== 'signal'     : sig_df_map[sample_obj.sample_set].append(input_df)
+                elif sample_obj.label.lower()=='background': bkg_df_map[sample_obj.sample_set].append(input_df)
+                elif sample_obj.label.lower()=='data'      : data_df_map[sample_obj.sample_set].append(input_df)
+                else: raise Exception ("Got incorrect label '%s', for sample: %s. Accepted labels are: 'signal', 'background', or 'data'" ) % (sample_obj.label, sample_name)
             else:
-                sample_df_map[sample_obj.name] = input_df
-            self.sample_df_map = sample_df_map
+                if sample_obj.label.lower() == 'signal'      : sig_df_map[sample_obj.name] = input_df
+                elif sample_obj.label.lower() == 'background': bkg_df_map[sample_obj.name] = input_df
+                elif sample_obj.label.lower() == 'data'      : data_df_map[sample_obj.name] = input_df
+                else: raise Exception ("Got incorrect label '%s', for sample: %s. Accepted labels are: 'signal', 'background', or 'data'" ) % (sample_obj.label, sample_name)
 
         if self.options.concat_years: 
-            for sample_name, sample_set in self.sample_df_map.iteritems():
-                try:  assert( len(self.sample_years) == len(sample_set) )
-                except: raise Exception('Number of years (%i) not equal to number of sub-samples (%i) in sample set: %s' %(len(years), len(sample_set), sample_name) )
-                for sample_set_name, sample_set_list in self.sample_df_map.iteritems():
-                    self.sample_df_map[sample_set_name] = pd.concat(sample_set_list)
+            #for sample_set_name, sample_set_list in self.signal_df_map.iteritems():
+            #    try:  assert( len(self.sample_years) == len(sample_set_list) )
+            #    except: raise Exception('Number of years (%i) not equal to number of sub-samples (%i) in sample set: %s' %(len(self.sample_years), len(sample_set_list), sample_set_name) )
+            #    self.sample_df_map[sample_set_name] = pd.concat(sample_set_list)
+
+            #for sample_set_name, sample_set_list in self.bkg_df_map.iteritems():
+            #    try:  assert( len(self.sample_years) == len(sample_set_list) )
+            #    except: raise Exception('Number of years (%i) not equal to number of sub-samples (%i) in sample set: %s' %(len(self.sample_years), len(sample_set_list), sample_set_name) )
+            #    self.sig_df_map[sample_set_name] = pd.concat(sample_set_list)
+
+            #for sample_set_name, sample_set_list in self.data_df_map.iteritems():
+            #    try:  assert( len(self.sample_years) == len(sample_set_list) )
+            #    except: raise Exception('Number of years (%i) not equal to number of sub-samples (%i) in sample set: %s' %(len(self.sample_years), len(sample_set_list), sample_set_name) )
+            #    self.data_df_map[sample_set_name] = pd.concat(sample_set_list)
+
+            #refactor above code
+            for df_dict in [sig_df_map, bkg_df_map, data_df_map]:
+                for sample_set_name, sample_set_list in df_dict.iteritems():
+                    try:  assert( len(self.sample_years) == len(sample_set_list) )
+                    except: raise Exception('Number of years (%i) not equal to number of sub-samples (%i) in sample set: %s' %(len(self.sample_years), len(sample_set_list), sample_set_name) )
+                    df_dict[sample_set_name] = pd.concat(sample_set_list)
+
+        self.sig_df_map  = sig_df_map
+        self.bkg_df_map  = bkg_df_map
+        self.data_df_map = data_df_map
 
     def systs_to_dfs(self):
         """
-        Function to read in systs for each sample and convert to a DataFrame.
+        Function to read in systs for each sample and convert to a DataFrame. 
+        Only reads systematics for processes labelled with bkg.
         If concat across years, hold dataframes in dict that looks like this: 
         {'sample_set_1' : {'syst_1_up': [syst_df_up_for_year_1, syst_df_up_for_year_2, ... ],
                            'syst_1_down': [syst_df_down_for_year_1, syst_df_down_for_year_2, ... ]
@@ -272,54 +301,60 @@ class Reader(object):
 
         syst_df_map = {}
 
+        #if self.options.concat_years: 
+        #    for sample_set in self.sample_sets:
+        #        #FIXME: implement this condition in abetter way, by looking at dicts
+        #        if sample_set.lower() != 'data':
+        #          syst_df_map[sample_set] = {}
+        #          for syst in self.systematics.keys():
+        #              syst_df_map[sample_set][syst+'Up']   = []
+        #              syst_df_map[sample_set][syst+'Down'] = []
+
         if self.options.concat_years: 
-            for sample_set in self.sample_sets:
-                if sample_set.lower() != 'data':
-                  syst_df_map[sample_set] = {}
+            for sample_obj in self.samples.values():
+                if sample_obj.label=='background':
+                  if sample_obj.sample_set not in syst_df_map.keys(): syst_df_map[sample_obj.sample_set] = {}
                   for syst in self.systematics.keys():
-                      syst_df_map[sample_set][syst+'Up']   = []
-                      syst_df_map[sample_set][syst+'Down'] = []
+                      syst_df_map[sample_obj.sample_set][syst+'Up']   = []
+                      syst_df_map[sample_obj.sample_set][syst+'Down'] = []
         else: #use the actual sample key rather than the key for the set as in above
-            for sample_name in self.samples.keys():
-                if sample_name.lower() != 'data':
+            for sample_obj in self.samples.values():
+                if sample_obj.label=='background':
                     for syst in self.systematics.keys():
-                        syst_df_map[sample_name][syst+'Up']   = pd.DataFrame()
-                        syst_df_map[sample_name][syst+'Down'] = pd.DataFrame()
+                        syst_df_map[sample_obj.name][syst+'Up']   = pd.DataFrame()
+                        syst_df_map[sample_obj.name][syst+'Down'] = pd.DataFrame()
 
         for sample_name, sample_obj in self.samples.iteritems():
-            input_file = upr.open( '%s/%s%s' % (sample_obj.file_path, sample_obj.name, sample_obj.file_ext) )
+            if sample_obj.label=='background':
+                input_file = upr.open( '%s/%s%s' % (sample_obj.file_path, sample_obj.name, sample_obj.file_ext) )
+                for syst, syst_obj in self.systematics.iteritems():
+                    print 'reading systematic %s for sample %s' %(sample_name, syst)
+                    up_tree            = input_file[syst_obj.up_tree]
+                    up_df              = up_tree.pandas.df(self.var_names+['weight'])
+                    up_df['weight']   *= float(sample_obj.lumi)
+                    if self.options.concat_years:
+                        syst_df_map[sample_obj.sample_set][syst+'Up'].append(up_df)
+                    else:
+                        syst_df_map[sample_obj.name][syst+'Up'] = up_df
 
-            for syst, syst_obj in self.systematics.iteritems():
-                print 'reading systematic %s for sample %s' %(sample_name, syst)
-                up_tree            = input_file[syst_obj.up_tree]
-                up_df              = up_tree.pandas.df(self.var_names+['weight'])
-                up_df['weight']   *= float(sample_obj.lumi)
-                if self.options.concat_years:
-                    syst_df_map[sample_obj.sample_set][syst+'Up'].append(up_df)
-                else:
-                    syst_df_map[sample_obj.name][syst+'Up'] = up_df
-
-                down_tree          = input_file[syst_obj.down_tree]
-                down_df            = down_tree.pandas.df(self.var_names+['weight'])
-                down_df['weight'] *= float(sample_obj.lumi)
-                if self.options.concat_years:
-                    syst_df_map[sample_obj.sample_set][syst+'Down'].append(down_df)
-                else:
-                    syst_df_map[sample_obj.name][syst+'Down'] = down_df
-
+                    down_tree          = input_file[syst_obj.down_tree]
+                    down_df            = down_tree.pandas.df(self.var_names+['weight'])
+                    down_df['weight'] *= float(sample_obj.lumi)
+                    if self.options.concat_years:
+                        syst_df_map[sample_obj.sample_set][syst+'Down'].append(down_df)
+                    else:
+                        syst_df_map[sample_obj.name][syst+'Down'] = down_df
+        print 'before concatting'
         print syst_df_map
 
         if self.options.concat_years: 
-            for sample_set_name in self.sample_sets:
-                for syst_name, syst_list  in syst_df_map[sample_set_name].iteritems():
-                    syst_df_map[sample_set_name][syst_name] = pd.concat(syst_list)
-        else:  
-            for sample_name in self.sample.keys():
-                for syst_name, syst_list  in syst_df_map[sample_name].iteritems():
-                    syst_df_map[sample_name][syst_name] = pd.concat(syst_list)
+            for sample_set_name, syst_dict in syst_df_map.iteritems():
+                for syst_name, syst_list  in syst_dict.iteritems():
+                        syst_df_map[sample_set_name][syst_name] = pd.concat(syst_list)
 
         self.syst_df_map = syst_df_map
-
+        print 'after concatting'
+        print self.syst_df_map
 
     def fill_cut_map(self):
         pass
