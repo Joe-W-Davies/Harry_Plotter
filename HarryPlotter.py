@@ -35,9 +35,9 @@ class Variable(object):
         self.__dict__.update(options)
         self.name     = name
         self.xlabel   = self.xlabel.replace('#', "\\")
-      
 
 
+#--------------------------------------------------------------------------------------
     
         
 class Sample(object):
@@ -316,10 +316,13 @@ class Plotter(object):
             fig  = plt.figure()
             axes = fig.gca()
 
+
         variable   = self.variables[var_key]
+        print 'drawing var: %s' % variable.name
         cut_string = self.assemble_cut_string(variable.name)
         bins       = np.linspace( eval(variable.bin_range)[0], eval(variable.bin_range)[1],
                                  variable.num_bins)
+
 
         if len(self.sig_df_map) != 0: 
             self.plot_signals(cut_string, axes, variable, bins)
@@ -333,7 +336,11 @@ class Plotter(object):
         if len( self.syst_df_map) != 0: 
             self.plot_systematics(cut_string, axes, variable, bins)
 
-        if variable.log: axes.set_yscale('log')
+        current_boottom, current_top = axes.get_ylim()
+        if variable.log:
+            axes.set_yscale('log')
+            axes.set_ylim(top= current_top*100)
+        else: axes.set_ylim(top= current_top*1.5)
 
         #FIXME: check which text sizes can be specified in the style file
         #axes.set_ylabel('Events/%.2f' %(bins[0]-bins[1]), size=axis_title_size)
@@ -342,9 +349,9 @@ class Plotter(object):
         axes.set_ylabel('Events/%.2f' % (abs(bins[0]-bins[1])), size=14)
         axes.set_xlabel('%s'%variable.xlabel, size=14)
         axes.text(0, 1.005, r'\textbf{CMS} %s' %self.options.cms_label, ha='left', va='bottom',
-                     transform=axes.transAxes, size=16)
-        axes.text(1, 1.005, r'%s %s'%(self.options.lumi_label, self.options.energy_label), ha='right', va='bottom', transform=axes.transAxes, size=14)
-
+                  transform=axes.transAxes, size=16)
+        axes.text(1, 1.005, r'%s %s'%(self.options.lumi_label, self.options.energy_label),
+                  ha='right', va='bottom', transform=axes.transAxes, size=14)
         fig.savefig('%s/%s.pdf' % (self.output_dir, variable.name))
         
 
@@ -392,9 +399,13 @@ class Plotter(object):
             #else:
 
             var_weights    = bkg_frame_cut['weight'].values
+
+            sumw, _           = np.histogram(var_to_plot, bins=bins, weights=var_weights)
+
             axes.hist(var_to_plot, bins=bins, label=sample_id, weights=var_weights, 
                       color=self.colour_sample_map[sample_id], histtype='stepfilled')
 
+            print '--> Integral of hist: %s, for sample: %s, is: %.2f' % (variable.name,sample_id,np.sum(sumw))
             
     #--------------------------------------------------------------
 
@@ -415,14 +426,15 @@ class Plotter(object):
 
             data_binned, bin_edges = np.histogram(var_to_plot, bins=bins, weights=var_weights)
             bin_centres = (bin_edges[:-1] + bin_edges[1:])/2
-            #xErrSym    = (binEdges[-1] - binEdges[-2])/2
             data_stat_down, data_stat_up = self.poisson_interval(data_binned, data_binned)
             #FIXME: sort this niche issue out
             #dataUp[dataUp==np.inf] == 0
             axes.errorbar(bin_centres, data_binned, yerr=[data_binned-data_stat_down, data_stat_up-data_binned],
                           label=sample_id, fmt='o', ms=4, color='black', capsize=0)
 
-            #add axis titles using var objects
+            sumw, _           = np.histogram(var_to_plot, bins=bins, weights=var_weights)
+
+            print '--> Integral of hist: %s, for sample: %s, is: %.2f' % (variable.name,sample_id,np.sum(sumw))
 
     #--------------------------------------------------------------
 
@@ -444,11 +456,11 @@ class Plotter(object):
         '''Form a string of cuts to query samples. Take care to remove
            the cuts on the variable being plot
         '''
-        #NOTE: if this takes too long, can resort to old style of cuts: df = df[var<cut] 
         cut_dict = self.cut_map.copy()
         if var_to_plot in cut_dict.keys(): del cut_dict[var_to_plot]
+        cut_list_non_null = [cut for cut in cut_dict.values() if cut != '']
         separator = ' and '
-        cut_string = separator.join(cut_dict.values())
+        cut_string = separator.join(cut_list_non_null)
         return cut_string
 
     #--------------------------------------------------------------
