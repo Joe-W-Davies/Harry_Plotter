@@ -12,13 +12,7 @@ def get_options():
     parser.add_option('-o', "--outdir", dest='out_dir', default='plots',
                       help='Path you want to write the output histograms to')
 
-    parser.add_option("-s", "--sampledir", dest="sample_dir",default='./data/',
-                      help='''
-                      Specify the detrectory where the trees are.
-                      e.g.: --sampledir /data/trees
-                      ''')
-
-    parser.add_option('-a', "--all", dest='draw_all', default=False,
+    parser.add_option('-a', "--all", dest='draw_all', default=True,
                       help='draw all variable specified on plot card')
 
     parser.add_option('-v', "--variable", dest='variable', default='',
@@ -42,7 +36,7 @@ if __name__ == '__main__':
         #should: 
         #        - read variables options [function done]
         #        - read other options [function done]
-        plotter = HP.Plotter(card.read())
+        plotter = HP.Plotter(card.read(), output_dir= opt.out_dir )
         plotter.read()
         #        - get trees for all samples and put them in df's []. takes account of concatting df's across years if we want to merge samples
         plotter.trees_to_dfs()
@@ -52,33 +46,10 @@ if __name__ == '__main__':
 
     #Plotter.plot
         #shoud:  - perform the plotting based on the options
-        for var_name in plotter.var_names:
-            plotter.draw(var_name)
+        if opt.draw_all:
+            for var_name in plotter.var_names:
+                plotter.draw(var_name)
             
-
-
-
-
-
-            
-        
-        
- 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        else: 
+            plotter.draw(opt.variable)
 

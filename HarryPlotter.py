@@ -1,13 +1,17 @@
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import uproot as upr
 import json
 import scipy.stats
-
-
 from os import system, path    
 import math
+import numpy as np
+import pandas as pd
+import uproot as upr
+import matplotlib.pyplot as plt
+import warnings
+try:
+    plt.style.use("cms10_6")
+except IOError:
+    warnings.warn('Could not import user defined matplot style file. Using default style settings...') 
+
                                
 class Variable(object):              
     '''
@@ -30,6 +34,7 @@ class Variable(object):
         self.__dict__ = self.template
         self.__dict__.update(options)
         self.name     = name
+        self.xlabel   = self.xlabel.replace('#', "\\")
       
 
 
@@ -59,22 +64,7 @@ class Sample(object):
         self.name     = name
         self.label    = self.label.lower()
         
-    def check_dir(self, file_path):
-        if not path.exists(file_path):
-          raise ('Error: %s file path not found') %file_path
 
-    def scale_to_lumi(self):
-        '''
-          Scale weights of given sample by lumi
-        '''
-        #apply self.lumi
-        pass
-
-    def scale_arbitrary(self):
-        '''
-          Scale sample weights by arbitrary ammount
-        '''
-        pass
 
     def reweight(self, reweight_var):
         '''
@@ -101,17 +91,6 @@ class Sample(object):
          
         return pd.concat(scaled_list)
 
-class dataFrameTools(object):
-    ''' 
-    collection of functions to handle dataframe operations
-    '''
-    def __init__(self):
-        pass
-
-    #--------------------------------------------------------------
-    def get_syst_trees(self):
-        '''Read ROOT TTree with systematic variations'''
-        pass
 
 #--------------------------------------------------------------------------------------
 
@@ -137,11 +116,14 @@ class Options(object):
     '''Object containing the plotting options'''
     def __init__(self, options={}):
         self.template = {
-            'ratio_range'  : (0,2),
-            'ratio_plot'   : False,
-            'total_lumi'   : '137~fb$^{-1}$',
-            'concat_years' : False,
-            'var_list '    : []
+            'ratio_range'   : (0,2),
+            'ratio_plot'    : False,
+            'global_labels' : False,
+            'lumi_label'    : '137~fb$^{-1}$',
+            'cms_label'     : 'Preliminary',
+            'energy_label'  : '(13 TeV)',
+            'concat_years'  : False,
+            'var_list '     : []
         }
         self.__dict__  = self.template
         self.__dict__.update(options)
@@ -154,7 +136,7 @@ class Options(object):
 class Plotter(object):
     '''Class to read the plot card'''
 
-    def __init__(self, card, sample_dir='', output_dir=''):
+    def __init__(self, card, output_dir=''):
         self.card              = card 
         self.variables         = {}
         self.samples           = {} #all samples in { key:df } format
@@ -162,8 +144,7 @@ class Plotter(object):
         self.options           = Options()
         self.ratio_range       = (0,2) #FIXME: make changeable for each variable (add att to var)
         self.cut_map           = {} #get all vars when read in
-        #self.sample_dir        = sample_dir
-        #self.output_dir        = output_dir
+        self.output_dir        = output_dir
 
         self.legend            = []
         self.var_names         = []
@@ -175,6 +156,9 @@ class Plotter(object):
         self.data_df_map       = {} 
         self.syst_df_map       = {} 
         self.colour_sample_map = {} 
+
+        self.check_dir(output_dir)
+
 
     def read(self):
         config = json.loads(self.card)
@@ -236,7 +220,8 @@ class Plotter(object):
             input_tree = input_file[sample_obj.tree]
             input_df   = input_tree.pandas.df(self.var_names+['weight'])
             if sample_obj.label.lower() != 'data' : input_df['weight']*=float(sample_obj.lumi)
-
+            input_df['weight']*=float(sample_obj.scale)
+            
             if self.options.concat_years:
                 if sample_obj.label.lower()== 'signal'     : sig_df_map[sample_obj.sample_set].append(input_df)
                 elif sample_obj.label.lower()=='background': bkg_df_map[sample_obj.sample_set].append(input_df)
@@ -249,22 +234,6 @@ class Plotter(object):
                 else: raise Exception ("Got incorrect label '%s', for sample: %s. Accepted labels are: 'signal', 'background', or 'data'" ) % (sample_obj.label, sample_name)
 
         if self.options.concat_years: 
-            #for sample_set_name, sample_set_list in self.signal_df_map.iteritems():
-            #    try:  assert( len(self.sample_years) == len(sample_set_list) )
-            #    except: raise Exception('Number of years (%i) not equal to number of sub-samples (%i) in sample set: %s' %(len(self.sample_years), len(sample_set_list), sample_set_name) )
-            #    self.sample_df_map[sample_set_name] = pd.concat(sample_set_list)
-
-            #for sample_set_name, sample_set_list in self.bkg_df_map.iteritems():
-            #    try:  assert( len(self.sample_years) == len(sample_set_list) )
-            #    except: raise Exception('Number of years (%i) not equal to number of sub-samples (%i) in sample set: %s' %(len(self.sample_years), len(sample_set_list), sample_set_name) )
-            #    self.sig_df_map[sample_set_name] = pd.concat(sample_set_list)
-
-            #for sample_set_name, sample_set_list in self.data_df_map.iteritems():
-            #    try:  assert( len(self.sample_years) == len(sample_set_list) )
-            #    except: raise Exception('Number of years (%i) not equal to number of sub-samples (%i) in sample set: %s' %(len(self.sample_years), len(sample_set_list), sample_set_name) )
-            #    self.data_df_map[sample_set_name] = pd.concat(sample_set_list)
-
-            #refactor above code
             for df_dict in [sig_df_map, bkg_df_map, data_df_map]:
                 for sample_set_name, sample_set_list in df_dict.iteritems():
                     try:  assert( len(self.sample_years) == len(sample_set_list) )
@@ -311,7 +280,7 @@ class Plotter(object):
                     print 'reading systematic %s for sample %s' %(sample_name, syst)
                     up_tree            = input_file[syst_obj.up_tree]
                     up_df              = up_tree.pandas.df(self.var_names+['weight'])
-                    up_df['weight']   *= float(sample_obj.lumi)
+                    up_df['weight']   *= (float(sample_obj.lumi) * float(sample_obj.scale))
                     if self.options.concat_years:
                         syst_df_map[sample_obj.sample_set][syst+'Up'].append(up_df)
                     else:
@@ -319,7 +288,8 @@ class Plotter(object):
 
                     down_tree          = input_file[syst_obj.down_tree]
                     down_df            = down_tree.pandas.df(self.var_names+['weight'])
-                    down_df['weight'] *= float(sample_obj.lumi)
+                    down_df['weight'] *= (float(sample_obj.lumi) * float(sample_obj.scale))
+
                     if self.options.concat_years:
                         syst_df_map[sample_obj.sample_set][syst+'Down'].append(down_df)
                     else:
@@ -331,6 +301,8 @@ class Plotter(object):
                     syst_df_map[sample_set_name][syst_name] = pd.concat(syst_list)
 
         self.syst_df_map = syst_df_map
+
+    #--------------------------------------------------------------
 
     def draw(self, var_key):
         '''
@@ -363,6 +335,19 @@ class Plotter(object):
 
         if variable.log: axes.set_yscale('log')
 
+        #FIXME: check which text sizes can be specified in the style file
+        #axes.set_ylabel('Events/%.2f' %(bins[0]-bins[1]), size=axis_title_size)
+        #axes.set_xlabel('%s'%variable.xlabel, size=axis_title_size)
+
+        axes.set_ylabel('Events/%.2f' % (abs(bins[0]-bins[1])), size=14)
+        axes.set_xlabel('%s'%variable.xlabel, size=14)
+        axes.text(0, 1.005, r'\textbf{CMS} %s' %self.options.cms_label, ha='left', va='bottom',
+                     transform=axes.transAxes, size=16)
+        axes.text(1, 1.005, r'%s %s'%(self.options.lumi_label, self.options.energy_label), ha='right', va='bottom', transform=axes.transAxes, size=14)
+
+        fig.savefig('%s/%s.pdf' % (self.output_dir, variable.name))
+        
+
     #--------------------------------------------------------------
     #FIXME: first parts of each of the 3 functions below can be
     #FIXME  put into a single function?
@@ -377,6 +362,7 @@ class Plotter(object):
         for sample_id, sig_frame in self.sig_df_map.iteritems():
             sig_frame_cut  = sig_frame.query(cut_string).copy()
             var_to_plot    = sig_frame_cut[variable.name].values
+            
            
             #FIXME: if: variable.kfactor>1:
                 #apply weight scaling and append to sample label!
@@ -389,8 +375,6 @@ class Plotter(object):
             axes.hist(var_to_plot, bins=bins, label=sample_id, weights=var_weights, 
                       color=self.colour_sample_map[sample_id], histtype='step')
             
-
-
     #--------------------------------------------------------------
 
     def plot_bkgs(self, cut_string, axes, variable, bins):
@@ -451,7 +435,6 @@ class Plotter(object):
             for syst_name, syst_df  in syst_dict.iteritems():
                 syst_df_cut = syst_df.query(cut_string)
 
-
         #FIXME: use multiple functions to handle systemtic variations, 
         #FIXME  and append results to attributes of a systematics class!
 
@@ -467,7 +450,7 @@ class Plotter(object):
         separator = ' and '
         cut_string = separator.join(cut_dict.values())
         return cut_string
-        
+
     #--------------------------------------------------------------
 
     def print_cuts(self):
@@ -519,6 +502,9 @@ class Plotter(object):
         
         return l, u
 
+    def check_dir(self, file_path):
+        if not path.isdir(file_path):
+            system('mkdir -p %s'%file_path)
 
 class trackSystError():
     '''

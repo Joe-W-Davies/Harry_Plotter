@@ -9,19 +9,87 @@
             "xlabel"    : "$p_{T}^{#mathrm{ee}$",
             "norm"      : false,
             "log"       : true,
-            "ratio"     : false,
-            "lumi"      : "59.7"
+            "ratio"     : false
         },  
         "dipho_mass":
         {   
-            "bin_range" : "(80,150)",
+            "bin_range" : "(50,130)",
             "num_bins"  : "40",
             "cuts"      : "dipho_mass>80 and dipho_mass<100",
             "xlabel"    : "$m_{#mathrm{ee}}$",
             "norm"      : true,
             "log"       : false,
-            "ratio"     : true,
-            "lumi"      : "59.7"
+            "ratio"     : true
+        },
+        "gghMVA_Mjj":
+        {   
+            "bin_range" : "(0,600)",
+            "num_bins"  : "40",
+            "cuts"      : "gghMVA_Mjj<350",
+            "xlabel"    : "$m_{jj}$",
+            "norm"      : false,
+            "log"       : false,
+            "ratio"     : true
+        },
+        "dipho_leadIDMVA":
+        {   
+            "bin_range" : "(-1,1)",
+            "num_bins"  : "40",
+            "cuts"      : "dipho_leadIDMVA>-0.9",
+            "xlabel"    : "Leading photon BDT score",
+            "norm"      : false,
+            "log"       : false,
+            "ratio"     : true
+        },
+        "dipho_subleadIDMVA":
+        {   
+            "bin_range" : "(-1,1)",
+            "num_bins"  : "40",
+            "cuts"      : "dipho_subleadIDMVA>-0.9",
+            "xlabel"    : "Sub-leading photon BDT score",
+            "norm"      : false,
+            "log"       : false,
+            "ratio"     : true
+        },
+        "dipho_lead_ptoM":
+        {   
+            "bin_range" : "(0.4,1)",
+            "num_bins"  : "40",
+            "cuts"      : "dipho_lead_ptoM>-0.333",
+            "xlabel"    : "Leading photon $p_{T}/m_{#mathrm{ee}}$",
+            "norm"      : false,
+            "log"       : false,
+            "ratio"     : true
+        },
+        "dipho_sublead_ptoM":
+        {   
+            "bin_range" : "(0.2,1)",
+            "num_bins"  : "40",
+            "cuts"      : "dipho_sublead_ptoM>-0.9",
+            "xlabel"    : "Sub-leading photon $p_{T}/m_{#mathrm{ee}}$",
+            "norm"      : false,
+            "log"       : false,
+            "ratio"     : true
+        },
+        "dipho_leadPt":
+        {   
+            "bin_range" : "(0,500)",
+            "num_bins"  : "40",
+            "cuts"      : "dipho_leadPt>40",
+            "xlabel"    : "Lead $p_{T}$",
+            "norm"      : false,
+            "log"       : false,
+            "ratio"     : true
+        },
+        "dipho_mva":
+        {   
+            "bin_range" : "(-1,1)",
+            "num_bins"  : "30",
+            "cuts"      : "",
+            "xlabel"    : "Diphoton MVA score",
+            "norm"      : false,
+            "log"       : false,
+            "ratio"     : true
         }
     },
     "samples":
@@ -35,7 +103,7 @@
             "file_ext"      : ".root",
             "sample_set"    : "DYMC",
             "label"         : "background",
-            "colour"        : "blue"
+            "colour"        : "#cbcbe5"
         },
         "DYMC_2017_PAS5":
         {
@@ -46,7 +114,7 @@
             "file_ext"      : ".root",
             "sample_set"    : "DYMC",
             "label"         : "background",
-            "colour"        : "blue"
+            "colour"        : "#cbcbe5"
         },
         "DYData_2016_PAS5":
         {
@@ -56,8 +124,7 @@
             "lumi"          : "37.1",
             "file_ext"      : ".root",
             "sample_set"    : "Data",
-            "label"         : "data",
-            "colour"        : "red"
+            "label"         : "data"
         },
         "DYData_2017_PAS5":
         {
@@ -67,8 +134,7 @@
             "lumi"          : "41.5",
             "file_ext"      : ".root",
             "sample_set"    : "Data",
-            "label"         : "data",
-            "colour"        : "red"
+            "label"         : "data"
         }
     },
     "systematics": {
@@ -84,9 +150,11 @@
     "options": 
     {
         "ratio_range"   : "(0,2)",
-        "global_label"  : "",
-        "cms_label"     : "Preliminary",
-        "energy_label"  : "13 TeV",
+        "ratio_plot"    : false,
+        "global_labels" : "",
+        "cms_label"     : "",
+        "energy_label"  : "(13 TeV)",
+        "lumi_label"    : "137~fb$^{-1}$",
         "concat_years"  : true
     }
 }
