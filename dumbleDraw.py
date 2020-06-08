@@ -17,6 +17,13 @@ def get_options():
                       Specify the detrectory where the trees are.
                       e.g.: --sampledir /data/trees
                       ''')
+
+    parser.add_option('-a', "--all", dest='draw_all', default=False,
+                      help='draw all variable specified on plot card')
+
+    parser.add_option('-v', "--variable", dest='variable', default='',
+                      help='name of a single variable to be drawn')
+   
     return parser.parse_args()
 
 
@@ -24,28 +31,54 @@ def get_options():
 
 #wont work since it needs to be invoken on an object
 
-# NB reader uses objects from Sample, Options, Variable, Systematics
+# NB Plotter uses objects from Sample, Options, Variable, Systematics
 
 if __name__ == '__main__':
     (opt, args) = get_options()
   #STEPS:
   #get plot card: from options
     with open(opt.plot_card) as card: 
-    #FIXME: what is the best way to fill as class attributes using a dict?? 
-    #FIXME: esp if we want some attributes to just be their deafult values
-
-    # HP.Reader.read
+    # HP.Plotter.read
         #should: 
         #        - read variables options [function done]
         #        - read other options [function done]
-        reader = HP.Reader(card.read())
-        reader.read()
+        plotter = HP.Plotter(card.read())
+        plotter.read()
         #        - get trees for all samples and put them in df's []. takes account of concatting df's across years if we want to merge samples
-        reader.trees_to_dfs()
+        plotter.trees_to_dfs()
         # get trees for systematics and hold them in dicts. Takes account of concatting df's across years if we want to merge samples
-        reader.systs_to_dfs()
+        plotter.systs_to_dfs()
 
 
-    #HP.plotting
+    #Plotter.plot
         #shoud:  - perform the plotting based on the options
+        for var_name in plotter.var_names:
+            plotter.draw(var_name)
+            
+
+
+
+
+
+            
+        
+        
  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

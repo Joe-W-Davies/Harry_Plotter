@@ -3,6 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import uproot as upr
 import json
+import scipy.stats
 
 
 from os import system, path    
@@ -16,7 +17,7 @@ class Variable(object):
     def __init__(self, name, options={}):
         self.template = {
             'name'       : '',
-            'range'      : '(0,100)',
+            'bin_range'  : '(0,100)',
             'num_bins'   : '30',
             'cuts'       : '',
             'lumi'       : 1.0,
@@ -25,27 +26,12 @@ class Variable(object):
             'norm'       : False,
             'reweight'   : False, #FIXME: protect against this being defined for more than one var
             'ratio'      : False ,
-            'colour'     : 'red'
         }
         self.__dict__ = self.template
         self.__dict__.update(options)
         self.name     = name
       
 
-    def assemble_cut_string(self, varToPlot, cutMap):
-        '''Form a string of cuts to query samples. Take care to remove
-           the cuts on the variable being plot
-        '''
-        tempCuts = dict(cutMap)
-        if varToPlot in tempCuts.keys(): del tempCuts[varToPlot]
-        cutString = ''
-        for iVar, (varName,cuts) in enumerate(tempCuts.iteritems()):
-          for cut in cuts:  
-            if iVar != len(tempCuts)-1:
-              cutString += (varName + cut + ' and ')
-            else: 
-              cutString += (varName + cut)
-        return cutString
 
     
         
@@ -64,7 +50,8 @@ class Sample(object):
         'scale'      : 1.0,
         'year'       : None,
         'file_ext'   : '.root',
-        'sample_set' : ''
+        'sample_set' : '',
+        'colour'     : 'red'
         }
         self.__dict__ = self.template
         self.__dict__.update(options)
@@ -152,7 +139,7 @@ class Options(object):
         self.template = {
             'ratio_range'  : (0,2),
             'ratio_plot'   : False,
-            'total_lumi'   : False,
+            'total_lumi'   : '137~fb$^{-1}$',
             'concat_years' : False,
             'var_list '    : []
         }
@@ -164,30 +151,30 @@ class Options(object):
       
 #--------------------------------------------------------------------------------------
 
-class Reader(object):
+class Plotter(object):
     '''Class to read the plot card'''
 
     def __init__(self, card, sample_dir='', output_dir=''):
-        self.card          = card 
-        self.variables     = {}
-        self.samples       = {} #all samples in { key:df } format
-        self.systematics   = {}
-        self.options       = Options()
-        self.ratio_range   = (0,2) #get from options
-        self.total_lumi    = '137 fb$^({-1}$' #get from options
-        self.cut_map       = {} #get all vars when read in
-        #self.sample_dir    = sample_dir
-        #self.output_dir    = output_dir
+        self.card              = card 
+        self.variables         = {}
+        self.samples           = {} #all samples in { key:df } format
+        self.systematics       = {}
+        self.options           = Options()
+        self.ratio_range       = (0,2) #FIXME: make changeable for each variable (add att to var)
+        self.cut_map           = {} #get all vars when read in
+        #self.sample_dir        = sample_dir
+        #self.output_dir        = output_dir
 
-        self.legend        = ['']
-        self.var_names     = []
-        self.sample_sets   = set() #unique set of name that span years 
-        self.sample_years  = set() 
-        self.sample_labels = set() 
-        self.signal_df_map = {} 
-        self.bkg_df_map    = {} 
-        self.data_df_map   = {} 
-        self.syst_df_map   = {} 
+        self.legend            = []
+        self.var_names         = []
+        self.sample_sets       = set() #unique set of name that span years 
+        self.sample_years      = set() 
+        self.sample_labels     = set() 
+        self.signal_df_map     = {} 
+        self.bkg_df_map        = {} 
+        self.data_df_map       = {} 
+        self.syst_df_map       = {} 
+        self.colour_sample_map = {} 
 
     def read(self):
         config = json.loads(self.card)
@@ -197,6 +184,7 @@ class Reader(object):
                       var = Variable(var_name, var_options)
                       self.variables[var.name] = var
                       self.var_names.append(var.name)
+                      self.cut_map[var.name] = var.cuts
             if 'options' in key:
                 opts = Options(config[key])
                 self.options = opts
@@ -211,6 +199,7 @@ class Reader(object):
                     samples[sample_name]  = sample
                     self.sample_sets.add(sample.sample_set)
                     self.sample_years.add(sample.year)
+                    self.colour_sample_map[sample.sample_set] = sample.colour
                 self.samples = samples
 
     def trees_to_dfs(self):
@@ -301,15 +290,6 @@ class Reader(object):
 
         syst_df_map = {}
 
-        #if self.options.concat_years: 
-        #    for sample_set in self.sample_sets:
-        #        #FIXME: implement this condition in abetter way, by looking at dicts
-        #        if sample_set.lower() != 'data':
-        #          syst_df_map[sample_set] = {}
-        #          for syst in self.systematics.keys():
-        #              syst_df_map[sample_set][syst+'Up']   = []
-        #              syst_df_map[sample_set][syst+'Down'] = []
-
         if self.options.concat_years: 
             for sample_obj in self.samples.values():
                 if sample_obj.label=='background':
@@ -344,35 +324,162 @@ class Reader(object):
                         syst_df_map[sample_obj.sample_set][syst+'Down'].append(down_df)
                     else:
                         syst_df_map[sample_obj.name][syst+'Down'] = down_df
-        print 'before concatting'
-        print syst_df_map
 
         if self.options.concat_years: 
             for sample_set_name, syst_dict in syst_df_map.iteritems():
                 for syst_name, syst_list  in syst_dict.iteritems():
-                        syst_df_map[sample_set_name][syst_name] = pd.concat(syst_list)
+                    syst_df_map[sample_set_name][syst_name] = pd.concat(syst_list)
 
         self.syst_df_map = syst_df_map
-        print 'after concatting'
-        print self.syst_df_map
 
-    def fill_cut_map(self):
-        pass
+    def draw(self, var_key):
+        '''
+        Main function to do the drawing, called once per variable.
+        '''
 
-    def print_cuts(self):
-        pass
+        if self.options.ratio_plot: 
+            fig, axes = plt.subplots(nrows=2, ncols=1, dpi=200, sharex=True,
+                                          gridspec_kw ={'height_ratios':[3,0.8], 'hspace':0.08})    
+        else:
+            fig  = plt.figure()
+            axes = fig.gca()
 
-    def get_var_names(self):
-        return self.var_names
+        variable   = self.variables[var_key]
+        cut_string = self.assemble_cut_string(variable.name)
+        bins       = np.linspace( eval(variable.bin_range)[0], eval(variable.bin_range)[1],
+                                 variable.num_bins)
 
-class plotting():
-    '''Class to perform various plot related functions'''
+        if len(self.sig_df_map) != 0: 
+            self.plot_signals(cut_string, axes, variable, bins)
 
-    def __init__(self):
-        pass
+        if len(self.bkg_df_map) != 0: 
+            self.plot_bkgs(cut_string, axes, variable, bins)
+                
+        if len(self.data_df_map) != 0: 
+            self.plot_data(cut_string, axes, variable, bins)
+
+        if len( self.syst_df_map) != 0: 
+            self.plot_systematics(cut_string, axes, variable, bins)
+
+        if variable.log: axes.set_yscale('log')
+
+    #--------------------------------------------------------------
+    #FIXME: first parts of each of the 3 functions below can be
+    #FIXME  put into a single function?
+    #FIXME  can probably refactor to avoid duplicating code 3 times
+
+    def plot_signals(self, cut_string, axes, variable, bins):
+        if self.options.ratio_plot:
+            #re-labeling means less code duplication when plotting on main canvas:
+            ratio_panel = axes[1]
+            axes = axes[0] 
+      
+        for sample_id, sig_frame in self.sig_df_map.iteritems():
+            sig_frame_cut  = sig_frame.query(cut_string).copy()
+            var_to_plot    = sig_frame_cut[variable.name].values
+           
+            #FIXME: if: variable.kfactor>1:
+                #apply weight scaling and append to sample label!
+            #else:
+            var_weights    = sig_frame_cut['weight'].values
+
+            #FIXME: check colours are consistent for the sample!.. or do this earlier
+            #FIXME when being read in, and append it as an attribute in this class
+
+            axes.hist(var_to_plot, bins=bins, label=sample_id, weights=var_weights, 
+                      color=self.colour_sample_map[sample_id], histtype='step')
+            
 
 
     #--------------------------------------------------------------
+
+    def plot_bkgs(self, cut_string, axes, variable, bins):
+        #FIXME: if: add options to stack backgrounds!
+        if self.options.ratio_plot:
+            ratio_panel = axes[1]
+            axes = axes[0]
+
+        for sample_id, bkg_frame in self.bkg_df_map.iteritems():
+            bkg_frame_cut     = bkg_frame.query(cut_string).copy()
+            var_to_plot       = bkg_frame_cut[variable.name].values
+           
+            #FIXME: if: variable.kfactor>1:
+                #apply weight scaling and append to sample label!
+            #else:
+
+            var_weights    = bkg_frame_cut['weight'].values
+            axes.hist(var_to_plot, bins=bins, label=sample_id, weights=var_weights, 
+                      color=self.colour_sample_map[sample_id], histtype='stepfilled')
+
+            
+    #--------------------------------------------------------------
+
+    def plot_data(self, cut_string, axes, variable, bins):
+        if self.options.ratio_plot:
+            ratio_panel = axes[1]
+            axes = axes[0]
+
+        for sample_id, data_frame in self.data_df_map.iteritems():
+            data_frame_cut     = data_frame.query(cut_string).copy()
+            var_to_plot        = data_frame_cut[variable.name].values
+           
+            #FIXME: if: variable.kfactor>1:
+                #apply weight scaling and append to sample label!
+            #else:
+
+            var_weights    = data_frame_cut['weight'].values
+
+            data_binned, bin_edges = np.histogram(var_to_plot, bins=bins, weights=var_weights)
+            bin_centres = (bin_edges[:-1] + bin_edges[1:])/2
+            #xErrSym    = (binEdges[-1] - binEdges[-2])/2
+            data_stat_down, data_stat_up = self.poisson_interval(data_binned, data_binned)
+            #FIXME: sort this niche issue out
+            #dataUp[dataUp==np.inf] == 0
+            axes.errorbar(bin_centres, data_binned, yerr=[data_binned-data_stat_down, data_stat_up-data_binned],
+                          label=sample_id, fmt='o', ms=4, color='black', capsize=0)
+
+            #add axis titles using var objects
+
+    #--------------------------------------------------------------
+
+    def plot_systematics(self, cut_string, axes, variable, bins):
+        if self.options.ratio_plot:
+            ratio_panel = axes[1]
+            axes = axes[0] 
+
+        for sample_id, syst_dict in self.syst_df_map.iteritems():
+            for syst_name, syst_df  in syst_dict.iteritems():
+                syst_df_cut = syst_df.query(cut_string)
+
+
+        #FIXME: use multiple functions to handle systemtic variations, 
+        #FIXME  and append results to attributes of a systematics class!
+
+    #--------------------------------------------------------------
+        
+    def assemble_cut_string(self, var_to_plot):
+        '''Form a string of cuts to query samples. Take care to remove
+           the cuts on the variable being plot
+        '''
+        #NOTE: if this takes too long, can resort to old style of cuts: df = df[var<cut] 
+        cut_dict = self.cut_map.copy()
+        if var_to_plot in cut_dict.keys(): del cut_dict[var_to_plot]
+        separator = ' and '
+        cut_string = separator.join(cut_dict.values())
+        return cut_string
+        
+    #--------------------------------------------------------------
+
+    def print_cuts(self):
+        print self.cut_map
+        #FIXME: make this into a nice format for printing
+
+    #--------------------------------------------------------------
+
+    def get_var_names(self):
+        return self.var_names
+    #--------------------------------------------------------------
+
     def draw_tot_error_band(self):
         pass
         #should take syst and stat
@@ -391,32 +498,7 @@ class plotting():
         pass
         #should take syst, stat, boolean from var object on whether to draw or not
 
-    #--------------------------------------------------------------
-    def draw(self):
-        '''
-        Main function to do the drawing
-        '''
-        #variable = self.variables[var_key]
-        pass
-
-
-class trackSystError():
-    '''
-    keep track on syst error in each bin, for each sample
-    '''
-    def __init__(self):
-        self.up_tree   = ''
-        self.down_tree = ''
-
-
-class trackStatError():
-    '''
-    keep track on stat error in each bin, for each sample
-    '''
-    def __init__(self):
-        pass
-
-    def poisson_interval(x, variance, level=0.68):
+    def poisson_interval(self, x, variance, level=0.68):
         neff = x**2/variance
         scale = x/neff
         
@@ -436,6 +518,27 @@ class trackStatError():
         u[variance==0.] = np.inf
         
         return l, u
+
+
+class trackSystError():
+    '''
+    Keep track on syst error in each bin, for each sample
+    (could make a dict and update but more transparent as a class).
+    '''
+    def __init__(self):
+        self.up_tree   = ''
+        self.down_tree = ''
+
+
+class trackStatError():
+    '''
+    keep track on stat error in each bin, for each sample,
+    (could make a dict and update but more transparent as a class).
+    '''
+
+    def __init__(self):
+        pass
+
 
    
 

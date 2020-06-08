@@ -3,27 +3,25 @@
     {
         "dipho_pt":
         { 
-            "range"    : "(0,300)",
-            "num_bins" : "25",
-            "cuts"     : "dipho_pt>10 and dipho_pt<300",
-            "xlabel"   : "$p_{T}^{#mathrm{ee}$",
-            "norm"     : false,
-            "log"      : true,
-            "ratio"    : false,
-            "lumi"     : "59.7",
-            "colour"   : "red"
+            "bin_range" : "(0,500)",
+            "num_bins"  : "25",
+            "cuts"      : "dipho_pt>10 and dipho_pt<300",
+            "xlabel"    : "$p_{T}^{#mathrm{ee}$",
+            "norm"      : false,
+            "log"       : true,
+            "ratio"     : false,
+            "lumi"      : "59.7"
         },  
         "dipho_mass":
         {   
-            "range"    : "(80,150)",
-            "num_bins" : "40",
-            "cuts"     : "",
-            "xlabel"   : "$m_{#mathrm{ee}}$",
-            "norm"     : true,
-            "log"      : false,
-            "ratio"    : true,
-            "lumi"     : "59.7",
-            "colour"   : "blue"
+            "bin_range" : "(80,150)",
+            "num_bins"  : "40",
+            "cuts"      : "dipho_mass>80 and dipho_mass<100",
+            "xlabel"    : "$m_{#mathrm{ee}}$",
+            "norm"      : true,
+            "log"       : false,
+            "ratio"     : true,
+            "lumi"      : "59.7"
         }
     },
     "samples":
@@ -36,7 +34,8 @@
             "lumi"          : "37.1",
             "file_ext"      : ".root",
             "sample_set"    : "DYMC",
-            "label"         : "background"
+            "label"         : "background",
+            "colour"        : "blue"
         },
         "DYMC_2017_PAS5":
         {
@@ -46,7 +45,8 @@
             "lumi"          : "41.5",
             "file_ext"      : ".root",
             "sample_set"    : "DYMC",
-            "label"         : "background"
+            "label"         : "background",
+            "colour"        : "blue"
         },
         "DYData_2016_PAS5":
         {
@@ -56,7 +56,8 @@
             "lumi"          : "37.1",
             "file_ext"      : ".root",
             "sample_set"    : "Data",
-            "label"         : "data"
+            "label"         : "data",
+            "colour"        : "red"
         },
         "DYData_2017_PAS5":
         {
@@ -66,7 +67,8 @@
             "lumi"          : "41.5",
             "file_ext"      : ".root",
             "sample_set"    : "Data",
-            "label"         : "data"
+            "label"         : "data",
+            "colour"        : "red"
         }
     },
     "systematics": {
