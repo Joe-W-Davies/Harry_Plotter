@@ -43,11 +43,11 @@
         },
         "dipho_leadEta":
         {   
-            "bin_range" : "(-4,4)",
+            "bin_range" : "(-3,3)",
             "num_bins"  : "40",
             "cuts"      : "",
             "xlabel"    : "Leading photon $#eta$",
-            "norm"      : false,
+            "norm"      : true,
             "log"       : false,
             "ratio"     : true
         },

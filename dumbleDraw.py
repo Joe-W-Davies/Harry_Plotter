@@ -12,7 +12,7 @@ def get_options():
     parser.add_option('-o', "--outdir", dest='out_dir', default='plots',
                       help='Path you want to write the output histograms to')
 
-    parser.add_option('-a', "--all", dest='draw_all', default=True,
+    parser.add_option('-a', "--all", dest='draw_all', default=False,
                       help='draw all variable specified on plot card')
 
     parser.add_option('-v', "--variable", dest='variable', default='',

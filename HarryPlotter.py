@@ -8,7 +8,7 @@ import uproot as upr
 import matplotlib.pyplot as plt
 import warnings
 try:
-    plt.style.use("cms10_6")
+    plt.style.use("cms10_6_HP")
 except IOError:
     warnings.warn('Could not import user defined matplot style file. Using default style settings...') 
 
@@ -340,18 +340,16 @@ class Plotter(object):
         if variable.log:
             axes.set_yscale('log')
             axes.set_ylim(top= current_top*100)
-        else: axes.set_ylim(top= current_top*1.5)
+        else: axes.set_ylim(top= current_top*1.3)
 
-        #FIXME: check which text sizes can be specified in the style file
-        #axes.set_ylabel('Events/%.2f' %(bins[0]-bins[1]), size=axis_title_size)
-        #axes.set_xlabel('%s'%variable.xlabel, size=axis_title_size)
-
-        axes.set_ylabel('Events/%.2f' % (abs(bins[0]-bins[1])), size=14)
-        axes.set_xlabel('%s'%variable.xlabel, size=14)
+        if variable.norm: axes.set_ylabel('1/N dN/d(%s) /%.2f' % (variable.xlabel,abs(bins[0]-bins[1])), ha='right', y=1)
+        else: axes.set_ylabel('Events/%.2f' % (abs(bins[0]-bins[1])), ha='right', y=1)
+        axes.set_xlabel('%s'%variable.xlabel, ha='right', x=1)
         axes.text(0, 1.005, r'\textbf{CMS} %s' %self.options.cms_label, ha='left', va='bottom',
                   transform=axes.transAxes, size=16)
         axes.text(1, 1.005, r'%s %s'%(self.options.lumi_label, self.options.energy_label),
                   ha='right', va='bottom', transform=axes.transAxes, size=14)
+        axes.legend(loc='upper right', bbox_to_anchor=(0.94,0.94)) 
         fig.savefig('%s/%s.pdf' % (self.output_dir, variable.name))
         
 
@@ -369,16 +367,16 @@ class Plotter(object):
         for sample_id, sig_frame in self.sig_df_map.iteritems():
             sig_frame_cut  = sig_frame.query(cut_string).copy()
             var_to_plot    = sig_frame_cut[variable.name].values
-            
-           
-            #FIXME: if: variable.kfactor>1:
-                #apply weight scaling and append to sample label!
-            #else:
             var_weights    = sig_frame_cut['weight'].values
 
-            #FIXME: check colours are consistent for the sample!.. or do this earlier
-            #FIXME when being read in, and append it as an attribute in this class
+            sumw, _            = np.histogram(var_to_plot, bins=bins, weights=var_weights)
+            if variable.norm: var_weights /= np.sum(sumw)
 
+            #FIXME: check colours are consistent for the sample!.. or do this earlier
+            #FIXME when being read in, and append it as sampe attribute 
+
+            #normed option is depracated so do manually
+            if variable.norm: var_weights /= np.sum(sumw)
             axes.hist(var_to_plot, bins=bins, label=sample_id, weights=var_weights, 
                       color=self.colour_sample_map[sample_id], histtype='step')
             
@@ -393,19 +391,25 @@ class Plotter(object):
         for sample_id, bkg_frame in self.bkg_df_map.iteritems():
             bkg_frame_cut     = bkg_frame.query(cut_string).copy()
             var_to_plot       = bkg_frame_cut[variable.name].values
-           
-            #FIXME: if: variable.kfactor>1:
-                #apply weight scaling and append to sample label!
-            #else:
 
-            var_weights    = bkg_frame_cut['weight'].values
-
+            var_weights       = bkg_frame_cut['weight'].values 
             sumw, _           = np.histogram(var_to_plot, bins=bins, weights=var_weights)
+            print '--> Integral of hist: %s, for sample: %s, is: %.2f' % (variable.name,sample_id,np.sum(sumw))
+
+
+            sumw2, _           = np.histogram(var_to_plot, bins=bins, weights=var_weights**2)
+            sumw_down, sumw_up = self.poisson_interval(sumw, sumw2)
+
+
+            #FIXME: if: add options to stack backgrounds!
+            if variable.norm:
+                var_weights /= np.sum(sumw)
+                sumw_down   /= np.sum(sumw)
+                sumw_up     /= np.sum(sumw)
 
             axes.hist(var_to_plot, bins=bins, label=sample_id, weights=var_weights, 
                       color=self.colour_sample_map[sample_id], histtype='stepfilled')
 
-            print '--> Integral of hist: %s, for sample: %s, is: %.2f' % (variable.name,sample_id,np.sum(sumw))
             
     #--------------------------------------------------------------
 
@@ -417,24 +421,25 @@ class Plotter(object):
         for sample_id, data_frame in self.data_df_map.iteritems():
             data_frame_cut     = data_frame.query(cut_string).copy()
             var_to_plot        = data_frame_cut[variable.name].values
-           
-            #FIXME: if: variable.kfactor>1:
-                #apply weight scaling and append to sample label!
-            #else:
-
-            var_weights    = data_frame_cut['weight'].values
+            var_weights        = data_frame_cut['weight'].values
 
             data_binned, bin_edges = np.histogram(var_to_plot, bins=bins, weights=var_weights)
+            print '--> Integral of hist: %s, for sample: %s, is: %.2f' % (variable.name,sample_id,np.sum(data_binned))
             bin_centres = (bin_edges[:-1] + bin_edges[1:])/2
             data_stat_down, data_stat_up = self.poisson_interval(data_binned, data_binned)
+
+            if variable.norm:
+                data_binned     /= np.sum(data_binned)
+                data_stat_down  /= np.sum(data_binned)
+                data_stat_up    /= np.sum(data_binned)
+
             #FIXME: sort this niche issue out
             #dataUp[dataUp==np.inf] == 0
-            axes.errorbar(bin_centres, data_binned, yerr=[data_binned-data_stat_down, data_stat_up-data_binned],
+
+            data_binned[data_binned==0] = np.nan
+            axes.errorbar(bin_centres, data_binned, 
+                          yerr=[data_binned-data_stat_down, data_stat_up-data_binned],
                           label=sample_id, fmt='o', ms=4, color='black', capsize=0)
-
-            sumw, _           = np.histogram(var_to_plot, bins=bins, weights=var_weights)
-
-            print '--> Integral of hist: %s, for sample: %s, is: %.2f' % (variable.name,sample_id,np.sum(sumw))
 
     #--------------------------------------------------------------
 
