@@ -28,8 +28,7 @@ class Variable(object):
             'xlabel'     : '',
             'log'        : False,
             'norm'       : False,
-            'reweight'   : False, #FIXME: protect against this being defined for more than one var
-            'ratio'      : False ,
+            'ratio'      : False
         }
         self.__dict__ = self.template
         self.__dict__.update(options)
@@ -66,30 +65,6 @@ class Sample(object):
         
 
 
-    def reweight(self, reweight_var):
-        '''
-        scale MC to data in bins of a given variable
-        '''
-
-        bins              = np.linspace( 0, 450, 51) 
-        preselected_mc    = mc_total.query(assemble_cut_string(reweight_var, cutMap))
-        preselected_data  = data_total.query(assemble_cut_string(reweight_var, cutMap))
-        var_mc            = preselected_mc[reweight_var].values
-        weight            = preselected_mc['weight'].values
-        var_data          = preselected_data[reweight_var].values
-         
-        summed_mc, _           = np.histogram(var_mc, bins=bins, weights=weight)
-        summed_data, bin_edges = np.histogram(var_data, bins=bins)
-        scale_factors          = summed_data/summed_mc
-         
-        scaled_list = []
-        for iBin in range(len(scale_factors)):
-            temp_total = mc_total[mc_total[reweight_var] > bin_edes[iBin]] 
-            temp_total = temp_total[temp_total[reweight_var] < bin_edges[iBin+1]] 
-            temp_total['weight'] *= scale_factors[iBin]
-            scaled_list.append(temp_total) 
-         
-        return pd.concat(scaled_list)
 
 
 #--------------------------------------------------------------------------------------
@@ -116,14 +91,18 @@ class Options(object):
     '''Object containing the plotting options'''
     def __init__(self, options={}):
         self.template = {
-            'ratio_range'   : (0,2),
-            'ratio_plot'    : False,
-            'global_labels' : False,
-            'lumi_label'    : '137~fb$^{-1}$',
-            'cms_label'     : 'Preliminary',
-            'energy_label'  : '(13 TeV)',
-            'concat_years'  : False,
-            'var_list '     : []
+            'ratio_plot'         : False,
+            'ratio_range'        : (0,2),
+            'global_labels'      : '',
+            'lumi_label'         : '137~fb$^{-1}$',
+            'cms_label'          : 'Preliminary',
+            'energy_label'       : '(13 TeV)',
+            'concat_years'       : False,
+            'reweight_var'       : '',
+            'reweight_samp_mc'   : '',
+            'reweight_samp_data' : '',
+            'var_list '          : []
+
         }
         self.__dict__  = self.template
         self.__dict__.update(options)
@@ -137,25 +116,26 @@ class Plotter(object):
     '''Class to read the plot card'''
 
     def __init__(self, card, output_dir=''):
-        self.card              = card 
-        self.variables         = {}
-        self.samples           = {} #all samples in { key:df } format
-        self.systematics       = {}
-        self.options           = Options()
-        self.ratio_range       = (0,2) #FIXME: make changeable for each variable (add att to var)
-        self.cut_map           = {} #get all vars when read in
-        self.output_dir        = output_dir
-
-        self.legend            = []
-        self.var_names         = []
-        self.sample_sets       = set() #unique set of name that span years 
-        self.sample_years      = set() 
-        self.sample_labels     = set() 
-        self.signal_df_map     = {} 
-        self.bkg_df_map        = {} 
-        self.data_df_map       = {} 
-        self.syst_df_map       = {} 
-        self.colour_sample_map = {} 
+        self.card                = card 
+        self.variables           = {}
+        self.samples             = {} #all samples in { key:df } format
+        self.systematics         = {}
+        self.options             = Options()
+        self.ratio_range         = (0,2) #FIXME: make changeable for each variable (add att to var)
+        self.cut_map             = {} #get all vars when read in
+        self.output_dir          = output_dir
+        self.legend              = []
+        self.var_names           = []
+        self.sample_sets         = set() #unique set of name that span years 
+        self.sample_years        = set() 
+        self.sample_labels       = set() 
+        self.signal_df_map       = {} 
+        self.bkg_df_map          = {} 
+        self.data_df_map         = {} 
+        self.syst_df_map         = {} 
+        self.colour_sample_map   = {} 
+        self.rew_scale_factors   = []
+        self.rew_bin_edges       = np.array
 
         self.check_dir(output_dir)
 
@@ -219,8 +199,10 @@ class Plotter(object):
             input_file = upr.open( '%s/%s%s' % (sample_obj.file_path, sample_obj.name, sample_obj.file_ext) )
             input_tree = input_file[sample_obj.tree]
             input_df   = input_tree.pandas.df(self.var_names+['weight'])
+
             if sample_obj.label.lower() != 'data' : input_df['weight']*=float(sample_obj.lumi)
-            input_df['weight']*=float(sample_obj.scale)
+            if len(self.options.reweight_var)==0: input_df['weight']*=float(sample_obj.scale)
+          
             
             if self.options.concat_years:
                 if sample_obj.label.lower()== 'signal'     : sig_df_map[sample_obj.sample_set].append(input_df)
@@ -239,6 +221,24 @@ class Plotter(object):
                     try:  assert( len(self.sample_years) == len(sample_set_list) )
                     except: raise Exception('Number of years (%i) not equal to number of sub-samples (%i) in sample set: %s' %(len(self.sample_years), len(sample_set_list), sample_set_name) )
                     df_dict[sample_set_name] = pd.concat(sample_set_list)
+
+        #apply reweighting (bkg->data) once all inputs have been read in
+        #FIXME: accomodate stacking of bkgs i.e. derive the re-weighting from the stacked bkgs
+
+        if len(self.options.reweight_var)!=0: 
+            #derive SFs in samples and variable specified in options:
+            scale_factors, bin_edges = self.derive_scale_factors(self.options.reweight_var,
+                                                                 bkg_df_map[self.options.reweight_samp_mc], 
+                                                                 data_df_map[self.options.reweight_samp_data])
+            self.rew_scale_factors = scale_factors
+            self.rew_bin_edges     = bin_edges
+
+            #apply scale factors to all bkgs in the dict
+            for sample_set_name, sample_df in bkg_df_map.iteritems():
+                bkg_df_map[sample_set_name] = self.apply_reweighting( self.options.reweight_var,
+                                                                      self.rew_scale_factors, 
+                                                                      self.rew_bin_edges,
+                                                                      sample_df)
 
         self.sig_df_map  = sig_df_map
         self.bkg_df_map  = bkg_df_map
@@ -280,15 +280,28 @@ class Plotter(object):
                     print 'reading systematic %s for sample %s' %(sample_name, syst)
                     up_tree            = input_file[syst_obj.up_tree]
                     up_df              = up_tree.pandas.df(self.var_names+['weight'])
+
                     up_df['weight']   *= (float(sample_obj.lumi) * float(sample_obj.scale))
+                    if len(self.options.reweight_var)!=0: 
+                        up_df = self.apply_reweighting(self.options.reweight_var,
+                                                       self.rew_scale_factors, 
+                                                       self.rew_bin_edges, 
+                                                       up_df)
+
                     if self.options.concat_years:
                         syst_df_map[sample_obj.sample_set][syst+'Up'].append(up_df)
                     else:
                         syst_df_map[sample_obj.name][syst+'Up'] = up_df
 
+
                     down_tree          = input_file[syst_obj.down_tree]
                     down_df            = down_tree.pandas.df(self.var_names+['weight'])
                     down_df['weight'] *= (float(sample_obj.lumi) * float(sample_obj.scale))
+                    if len(self.options.reweight_var)!=0: 
+                        down_df = self.apply_reweighting(self.options.reweight_var,
+                                                         self.rew_scale_factors,
+                                                         self.rew_bin_edges,
+                                                         down_df)
 
                     if self.options.concat_years:
                         syst_df_map[sample_obj.sample_set][syst+'Down'].append(down_df)
@@ -473,6 +486,38 @@ class Plotter(object):
     def print_cuts(self):
         print self.cut_map
         #FIXME: make this into a nice format for printing
+
+    #--------------------------------------------------------------
+
+    def derive_scale_factors(self, var_key, bkg_df, data_df):
+        '''
+        Scale MC to data in bins of a given variable and return scale factors
+        '''
+        variable   = self.variables[var_key]
+        bins       = np.linspace( eval(variable.bin_range)[0], eval(variable.bin_range)[1],
+                                 variable.num_bins)
+
+        preselected_mc         = bkg_df.query(self.assemble_cut_string(var_key))
+        preselected_data       = data_df.query(self.assemble_cut_string(var_key))
+        summed_mc, _           = np.histogram(preselected_mc[var_key].values, bins=bins, 
+                                              weights=preselected_mc['weight'].values)
+        summed_data, bin_edges = np.histogram(preselected_data[var_key].values, bins=bins)
+        scale_factors          = summed_data/summed_mc
+        return  scale_factors, bin_edges
+
+    #--------------------------------------------------------------
+
+    def apply_reweighting(self, var_key, scale_factors, bin_edges, df):
+        scaled_list = []
+        for ibin in range(len(scale_factors)):
+            temp_total = df[df[var_key] > bin_edges[ibin]] 
+            temp_total = temp_total[temp_total[var_key] < bin_edges[ibin+1]] 
+            temp_total['weight'] *= scale_factors[ibin]
+            scaled_list.append(temp_total) 
+        scaled_df = pd.concat(scaled_list)
+        del scaled_list           
+        return scaled_df
+
 
     #--------------------------------------------------------------
 

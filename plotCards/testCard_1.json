@@ -47,7 +47,7 @@
             "num_bins"  : "40",
             "cuts"      : "",
             "xlabel"    : "Leading photon $#eta$",
-            "norm"      : true,
+            "norm"      : false,
             "log"       : false,
             "ratio"     : true
         },
@@ -129,12 +129,15 @@
     },  
     "options": 
     {
-        "ratio_range"   : "(0,2)",
-        "ratio_plot"    : false,
-        "global_labels" : "",
-        "cms_label"     : "",
-        "energy_label"  : "(13 TeV)",
-        "lumi_label"    : "137~fb$^{-1}$",
-        "concat_years"  : true
+        "ratio_plot"         : false,
+        "ratio_range"        : "(0,2)",
+        "global_labels"      : "",
+        "cms_label"          : "",
+        "energy_label"       : "(13 TeV)",
+        "lumi_label"         : "137~fb$^{-1}$",
+        "reweight_var"       : "dipho_pt",
+        "reweight_samp_mc"   : "DYMC",
+        "reweight_samp_data" : "Data",
+        "concat_years"       : true
     }
 }
