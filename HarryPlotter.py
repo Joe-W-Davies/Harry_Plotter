@@ -35,6 +35,7 @@ class Variable(object):
         self.name     = name
         self.xlabel   = self.xlabel.replace('#', "\\")
 
+    def __repr__(): pass
 
 #--------------------------------------------------------------------------------------
     
@@ -63,7 +64,7 @@ class Sample(object):
         self.name     = name
         self.label    = self.label.lower()
         
-
+    def __repr__(): pass
 
 
 
@@ -85,6 +86,8 @@ class Systematic(object):
         self.__dict__.update(options)
         self.name = name
 
+    def __repr__(): pass
+
 #--------------------------------------------------------------------------------------
 
 class Options(object):
@@ -94,18 +97,21 @@ class Options(object):
             'ratio_plot'         : False,
             'ratio_range'        : (0,2),
             'global_labels'      : '',
-            'lumi_label'         : '137~fb$^{-1}$',
             'cms_label'          : 'Preliminary',
             'energy_label'       : '(13 TeV)',
             'concat_years'       : False,
             'reweight_var'       : '',
             'reweight_samp_mc'   : '',
             'reweight_samp_data' : '',
+            'stack_bkgs'         : False,
             'var_list '          : []
 
         }
         self.__dict__  = self.template
         self.__dict__.update(options)
+        self.total_lumi          = 137 #FIXME: update based on the set of lumis that are provided in json config
+
+    def __repr__(): pass
 
     def print_options(self):
         pass
@@ -121,8 +127,8 @@ class Plotter(object):
         self.samples             = {} #all samples in { key:df } format
         self.systematics         = {}
         self.options             = Options()
-        self.ratio_range         = (0,2) #FIXME: make changeable for each variable (add att to var)
-        self.cut_map             = {} #get all vars when read in
+        self.ratio_range         = (0,2) #FIXME: could make changeable for each variable? (add att to var)
+        self.cut_map             = {} 
         self.output_dir          = output_dir
         self.legend              = []
         self.var_names           = []
@@ -135,7 +141,7 @@ class Plotter(object):
         self.syst_df_map         = {} 
         self.colour_sample_map   = {} 
         self.rew_scale_factors   = []
-        self.rew_bin_edges       = np.array
+        self.rew_bin_edges       = np.array([])
 
         self.check_dir(output_dir)
 
@@ -322,60 +328,55 @@ class Plotter(object):
         Main function to do the drawing, called once per variable.
         '''
 
-        if self.options.ratio_plot: 
-            fig, axes = plt.subplots(nrows=2, ncols=1, dpi=200, sharex=True,
-                                          gridspec_kw ={'height_ratios':[3,0.8], 'hspace':0.08})    
-        else:
-            fig  = plt.figure()
-            axes = fig.gca()
-
-
         variable   = self.variables[var_key]
         print 'drawing var: %s' % variable.name
         cut_string = self.assemble_cut_string(variable.name)
         bins       = np.linspace( eval(variable.bin_range)[0], eval(variable.bin_range)[1],
                                  variable.num_bins)
 
+        if self.options.ratio_plot: 
+            fig, axes = plt.subplots(nrows=2, ncols=1, dpi=200, sharex=True,
+                                          gridspec_kw ={'height_ratios':[3,0.8], 'hspace':0.08})    
+            axes = self.set_canv_style(axes, variable, bins)
+        else:
+            fig  = plt.figure()
+            axes = fig.gca()
 
         if len(self.sig_df_map) != 0: 
             self.plot_signals(cut_string, axes, variable, bins)
 
-        if len(self.bkg_df_map) != 0: 
-            self.plot_bkgs(cut_string, axes, variable, bins)
-                
         if len(self.data_df_map) != 0: 
-            self.plot_data(cut_string, axes, variable, bins)
+            data_binned, bin_centres, data_stat_down_up = self.plot_data(cut_string, axes, variable, bins)
+
+        if len(self.bkg_df_map) != 0: 
+            self.plot_bkgs(cut_string, axes, variable, bins, data_binned, bin_centres, data_stat_down_up)
 
         if len( self.syst_df_map) != 0: 
             self.plot_systematics(cut_string, axes, variable, bins)
 
-        current_boottom, current_top = axes.get_ylim()
-        if variable.log:
-            axes.set_yscale('log')
-            axes.set_ylim(top= current_top*100)
-        else: axes.set_ylim(top= current_top*1.3)
+        #default axes dont have enough whitespace above plots, so add more. also set logy here
+        # (not in hists where you will get weird behaviour if y~0)
 
-        if variable.norm: axes.set_ylabel('1/N dN/d(%s) /%.2f' % (variable.xlabel,abs(bins[0]-bins[1])), ha='right', y=1)
-        else: axes.set_ylabel('Events/%.2f' % (abs(bins[0]-bins[1])), ha='right', y=1)
-        axes.set_xlabel('%s'%variable.xlabel, ha='right', x=1)
-        axes.text(0, 1.005, r'\textbf{CMS} %s' %self.options.cms_label, ha='left', va='bottom',
-                  transform=axes.transAxes, size=16)
-        axes.text(1, 1.005, r'%s %s'%(self.options.lumi_label, self.options.energy_label),
-                  ha='right', va='bottom', transform=axes.transAxes, size=14)
+        if self.options.ratio_plot: 
+            axes = axes[0]
         axes.legend(loc='upper right', bbox_to_anchor=(0.94,0.94)) 
+        canv_bottom, canv_top = axes.get_ylim()
+        axes.legend(loc='upper right', bbox_to_anchor=(0.94,0.94)) 
+        if variable.log:
+            axes.set_ylim(top= canv_top*100, bottom=canv_bottom*0.01) #log plot
+            axes.set_yscale('log', nonposy='clip')    
+        else: axes.set_ylim(top= canv_top*1.25)
+
         fig.savefig('%s/%s.pdf' % (self.output_dir, variable.name))
         
 
-    #--------------------------------------------------------------
+    #--------------------------------------------------------------------
+
     #FIXME: first parts of each of the 3 functions below can be
     #FIXME  put into a single function?
     #FIXME  can probably refactor to avoid duplicating code 3 times
 
     def plot_signals(self, cut_string, axes, variable, bins):
-        if self.options.ratio_plot:
-            #re-labeling means less code duplication when plotting on main canvas:
-            ratio_panel = axes[1]
-            axes = axes[0] 
       
         for sample_id, sig_frame in self.sig_df_map.iteritems():
             sig_frame_cut  = sig_frame.query(cut_string).copy()
@@ -390,47 +391,18 @@ class Plotter(object):
 
             #normed option is depracated so do manually
             if variable.norm: var_weights /= np.sum(sumw)
-            axes.hist(var_to_plot, bins=bins, label=sample_id, weights=var_weights, 
-                      color=self.colour_sample_map[sample_id], histtype='step')
-            
-    #--------------------------------------------------------------
 
-    def plot_bkgs(self, cut_string, axes, variable, bins):
-        #FIXME: if: add options to stack backgrounds!
-        if self.options.ratio_plot:
-            ratio_panel = axes[1]
-            axes = axes[0]
+            if self.options.ratio_plot:
+                axes[0].hist(var_to_plot, bins=bins, label=sample_id, weights=var_weights, 
+                             color=self.colour_sample_map[sample_id], histtype='step')
+            else:
+                axes.hist(var_to_plot, bins=bins, label=sample_id, weights=var_weights, 
+                          color=self.colour_sample_map[sample_id], histtype='step')
+            del sig_frame_cut
 
-        for sample_id, bkg_frame in self.bkg_df_map.iteritems():
-            bkg_frame_cut     = bkg_frame.query(cut_string).copy()
-            var_to_plot       = bkg_frame_cut[variable.name].values
-
-            var_weights       = bkg_frame_cut['weight'].values 
-            sumw, _           = np.histogram(var_to_plot, bins=bins, weights=var_weights)
-            print '--> Integral of hist: %s, for sample: %s, is: %.2f' % (variable.name,sample_id,np.sum(sumw))
-
-
-            sumw2, _           = np.histogram(var_to_plot, bins=bins, weights=var_weights**2)
-            sumw_down, sumw_up = self.poisson_interval(sumw, sumw2)
-
-
-            #FIXME: if: add options to stack backgrounds!
-            if variable.norm:
-                var_weights /= np.sum(sumw)
-                sumw_down   /= np.sum(sumw)
-                sumw_up     /= np.sum(sumw)
-
-            axes.hist(var_to_plot, bins=bins, label=sample_id, weights=var_weights, 
-                      color=self.colour_sample_map[sample_id], histtype='stepfilled')
-
-            
     #--------------------------------------------------------------
 
     def plot_data(self, cut_string, axes, variable, bins):
-        if self.options.ratio_plot:
-            ratio_panel = axes[1]
-            axes = axes[0]
-
         for sample_id, data_frame in self.data_df_map.iteritems():
             data_frame_cut     = data_frame.query(cut_string).copy()
             var_to_plot        = data_frame_cut[variable.name].values
@@ -449,10 +421,107 @@ class Plotter(object):
             #FIXME: sort this niche issue out
             #dataUp[dataUp==np.inf] == 0
 
-            data_binned[data_binned==0] = np.nan
-            axes.errorbar(bin_centres, data_binned, 
-                          yerr=[data_binned-data_stat_down, data_stat_up-data_binned],
-                          label=sample_id, fmt='o', ms=4, color='black', capsize=0)
+            data_binned[data_binned==0] = np.nan #removes markers at zero i.e. no entries
+
+            if self.options.ratio_plot:
+                axes[0].errorbar(bin_centres, data_binned, 
+                                 yerr=[data_binned-data_stat_down, data_stat_up-data_binned],
+                                 label=sample_id, fmt='o', ms=4, color='black', capsize=0)
+
+            else: 
+                axes.errorbar(bin_centres, data_binned, 
+                              yerr=[data_binned-data_stat_down, data_stat_up-data_binned],
+                              label=sample_id, fmt='o', ms=4, color='black', capsize=0)
+
+            return data_binned, bin_centres, (data_stat_down, data_stat_up)
+
+            
+    #--------------------------------------------------------------
+
+    def plot_bkgs(self, cut_string, axes, variable, bins, data_binned, bin_centres, data_stat_down_up):
+        if self.options.ratio_plot:
+            ratio_canv = axes[1]
+            axes = axes[0]
+
+        if self.options.stack_bkgs:
+            var_stack       = []
+            weight_stack    = []
+            label_stack     = []
+            colour_stack    = []
+            stat_down_stack = []
+            stat_up_stack   = []
+
+        for sample_id, bkg_frame in self.bkg_df_map.iteritems():
+            bkg_frame_cut     = bkg_frame.query(cut_string).copy()
+            var_to_plot       = bkg_frame_cut[variable.name].values
+            var_weights       = bkg_frame_cut['weight'].values 
+
+            sumw, _           = np.histogram(var_to_plot, bins=bins, weights=var_weights)
+            sumw2, _          = np.histogram(var_to_plot, bins=bins, weights=var_weights**2)
+            #FIXME: store this in dict, inside systematics object
+            stat_down, stat_up = self.poisson_interval(sumw, sumw2)
+            print '--> Integral of hist: %s, for sample: %s, is: %.2f' % (variable.name,sample_id,np.sum(sumw))
+
+            #FIXME: if: add options to stack backgrounds!
+ 
+
+            if self.options.stack_bkgs:
+                var_stack.append(var_to_plot)
+                weight_stack.append(var_weights)
+                label_stack.append(sample_id)
+                colour_stack.append(self.colour_sample_map[sample_id])
+
+            else: 
+                if variable.norm:
+                    var_weights /= np.sum(sumw)
+                    stat_down   /= np.sum(sumw)
+                    stat_up     /= np.sum(sumw)
+                axes.hist(var_to_plot, bins=bins, label=sample_id, weights=var_weights, 
+                          color=self.colour_sample_map[sample_id], histtype='stepfilled')
+
+                #if we have multiple bkgs that we dont want to stack, we can't define a ratio plot i.e. Data/ which bkg? so build this in below
+                if self.options.ratio_plot:
+                    if len(self.bkg_df_map.keys()) == 1:
+                        data_bkg_ratio   = data_binned/sumw
+                        ratio_canv.errorbar( bin_centres, data_bkg_ratio, yerr=[(data_binned-data_stat_down_up[0])/sumw,(data_stat_down_up[1] - data_binned)/sumw], fmt='o', ms=4, color='black', capsize=0, zorder=3)
+                    else: raise Exception("Requested a ratio plot, but have given more than one background. Did you mean to set option 'stack_backgrounds' = True? ")
+
+            del bkg_frame_cut
+
+        #draw stack if exists
+        if self.options.stack_bkgs:
+            if variable.norm:
+                normed_weights   = [ normed_weights / np.sum(sumw_stack) for normed_weights in weight_stack]
+                normed_stat_down = [ normed_stat_down / np.sum(sumw_stack) for normed_stat_down in stat_down_stack]
+                normed_stat_up   = [ normed_stat_up / np.sum(sumw_stack) for normed_stat_down in stat_up_stack]
+
+            axes.hist(var_stack, bins=bins, label=label_stack, weights=weight_stack, 
+                            color=colour_stack, histtype='stepfilled', stacked=True)
+            
+            mc_stack_binned, _   = np.histogram(np.concatenate(var_stack), bins=bins, weights=np.concatenate(weight_stack))
+            data_bkg_ratio     = data_binned/mc_stack_binned
+            ratio_canv.errorbar( bin_centres, data_bkg_ratio, yerr=[(data_binned-data_stat_down_up[0])/sumw,(data_stat_down_up[1] - data_binned)/sumw], fmt='o', ms=4, color='black', capsize=0, zorder=3)
+
+
+            
+    #--------------------------------------------------------------
+
+    def set_canv_style(self, axes, variable, bins):
+        x_err = abs(bins[-1] - bins[-2])
+        axes[0].set_ylabel('Events/%.2f' %(2*x_err) , size=14, ha='right', y=1)
+        if variable.norm: axes[0].set_ylabel('1/N dN/d(%s) /%.2f' % (variable.xlabel,x_err), size=14)
+        axes[0].text(0, 1.005, r'\textbf{CMS}', ha='left', va='bottom', transform=axes[0].transAxes, size=16)           
+        axes[0].text(0.13, 1.005, r'\emph{%s}'%self.options.cms_label, ha='left', va='bottom', transform=axes[0].transAxes, size=14)           
+        axes[0].text(1, 1.005, r'%.0f~fb$^{-1}$ (13 TeV)'%self.options.total_lumi, ha='right', va='bottom', transform=axes[0].transAxes, size=14)
+        #if variable.norm: axes[0].set_ylabel('1/N dN/d(%s) /%.2f' % (variable.xlabel,x_err, ha='right', y=1)
+       
+       
+        axes[1].set_xlabel(variable.xlabel, size=14, ha='right', x=1)
+        axes[1].set_ylim(self.ratio_range[0],self.ratio_range[1])
+        axes[1].grid(True, linestyle='dotted')
+
+        return axes
+    
 
     #--------------------------------------------------------------
 

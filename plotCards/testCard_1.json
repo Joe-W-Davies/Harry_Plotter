@@ -129,15 +129,16 @@
     },  
     "options": 
     {
-        "ratio_plot"         : false,
+        "ratio_plot"         : true,
         "ratio_range"        : "(0,2)",
         "global_labels"      : "",
-        "cms_label"          : "",
+        "cms_label"          : "Preliminary",
         "energy_label"       : "(13 TeV)",
         "lumi_label"         : "137~fb$^{-1}$",
         "reweight_var"       : "dipho_pt",
         "reweight_samp_mc"   : "DYMC",
         "reweight_samp_data" : "Data",
+        "stack_bkgs"         : false,
         "concat_years"       : true
     }
 }
