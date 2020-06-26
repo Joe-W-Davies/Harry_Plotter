@@ -3,8 +3,8 @@
     {
         "dipho_pt":
         { 
-            "bin_range" : "(0,500)",
-            "num_bins"  : "25",
+            "bin_range" : "(0,450)",
+            "num_bins"  : "41",
             "cuts"      : "",
             "xlabel"    : "$p_{T}^{#mathrm{ee}$",
             "norm"      : false,
@@ -100,7 +100,6 @@
             "file_path"     : "/vols/cms/jwd18/Stage1categorisation/Pass1/2016/trees/",
             "year"          : "2016",
             "lumi"          : "35.9",
-            "scale"         : "0.68824",
             "file_ext"      : ".root",
             "sample_set"    : "DYMC",
             "label"         : "background",
@@ -115,6 +114,27 @@
             "file_ext"      : ".root",
             "sample_set"    : "Data",
             "label"         : "data"
+        },
+        "DYMC_2017_PAS5":
+        {
+            "tree"          : "vbfTagDumper/trees/zee_13TeV_GeneralDipho",
+            "file_path"     : "/vols/cms/jwd18/Stage1categorisation/Pass1/2017/trees/",
+            "year"          : "2017",
+            "lumi"          : "41.5",
+            "file_ext"      : ".root",
+            "sample_set"    : "DYMC",
+            "label"         : "background",
+            "colour"        : "#cbcbe5"
+        },
+        "DYData_2017_PAS5":
+        {
+            "tree"          : "vbfTagDumper/trees/Data_13TeV_GeneralDipho",
+            "file_path"     : "/vols/cms/jwd18/Stage1categorisation/Pass1/2017/trees/",
+            "year"          : "2017",
+            "lumi"          : "41.5",
+            "file_ext"      : ".root",
+            "sample_set"    : "Data",
+            "label"         : "data"
         }
     },
     "systematics": {
@@ -125,7 +145,15 @@
         "JER": {
             "up_tree"   : "vbfTagDumper/trees/zee_13TeV_GeneralDipho_JERUp01sigma",
             "down_tree" : "vbfTagDumper/trees/zee_13TeV_GeneralDipho_JERDown01sigma"
-        }   
+        },
+        "IDMVA": {
+            "up_tree"   : "vbfTagDumper/trees/zee_13TeV_GeneralDipho_MvaShiftUp01sigma",
+            "down_tree" : "vbfTagDumper/trees/zee_13TeV_GeneralDipho_MvaShiftDown01sigma"
+        },
+        "SimgaEOverE": {
+            "up_tree"   : "vbfTagDumper/trees/zee_13TeV_GeneralDipho_SigmaEOverEShiftUp01sigma",
+            "down_tree" : "vbfTagDumper/trees/zee_13TeV_GeneralDipho_SigmaEOverEShiftDown01sigma"
+        }
     },  
     "options": 
     {
@@ -134,7 +162,6 @@
         "global_labels"      : "",
         "cms_label"          : "Preliminary",
         "energy_label"       : "(13 TeV)",
-        "lumi_label"         : "137~fb$^{-1}$",
         "reweight_var"       : "dipho_pt",
         "reweight_samp_mc"   : "DYMC",
         "reweight_samp_data" : "Data",

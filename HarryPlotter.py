@@ -132,16 +132,19 @@ class Plotter(object):
         self.output_dir          = output_dir
         self.legend              = []
         self.var_names           = []
-        self.sample_sets         = set() #unique set of name that span years 
+        self.sample_sets         = set() #unique set of name that span years i.e. processes
         self.sample_years        = set() 
         self.sample_labels       = set() 
         self.signal_df_map       = {} 
         self.bkg_df_map          = {} 
         self.data_df_map         = {} 
-        self.syst_df_map         = {} 
-        self.colour_sample_map   = {} 
         self.rew_scale_factors   = []
         self.rew_bin_edges       = np.array([])
+        self.colour_sample_map   = {} 
+        #FIXME: can probably put some of these attribues inside one systematic class object for each sample?
+        self.syst_df_map         = {} 
+        self.mc_totals           = {} 
+        self.mc_stat_uncs        = {} 
 
         self.check_dir(output_dir)
 
@@ -254,13 +257,19 @@ class Plotter(object):
         """
         Function to read in systs for each sample and convert to a DataFrame. 
         Only reads systematics for processes labelled with bkg.
-        If concat across years, hold dataframes in dict that looks like this: 
-        {'sample_set_1' : {'syst_1_up': [syst_df_up_for_year_1, syst_df_up_for_year_2, ... ],
-                           'syst_1_down': [syst_df_down_for_year_1, syst_df_down_for_year_2, ... ]
-                           'syst_2': [...], ... }, 'sample_set_2' : {...}, ...}
+        If concatting across years, hold dataframes in dict that looks like this: 
+        {'proc_1' : { 'syst_1_up'  : [syst_df_up_for_year_1, syst_df_up_for_year_2, ... ],
+                      'syst_1_down': [syst_df_down_for_year_1, syst_df_down_for_year_2, ... ], 
+                      'syst_2_up':   [...], ... 
+                    },
+         'proc_2' : {...},
+         ...
+         }
         The lists  will then be concattenated across years i.e. flattened out
-        Otherwise just store with one key per sample:
-        {'sample_id_1' : {syst_1_up : df_up, syst_1_down : df_down, syst_2_up: ..., ...}, 'sample_id_2' : ..., ...}
+        {'proc_1' : {syst_1_up : df, syst_1_down : df_down, syst_2_up: df_up, ...},
+         'proc_2' : {...}
+        }
+        If we dont want to concat across years, just store with one key per sample i.e. proc_names->sample_name
         """
 
         syst_df_map = {}
@@ -272,7 +281,7 @@ class Plotter(object):
                   for syst in self.systematics.keys():
                       syst_df_map[sample_obj.sample_set][syst+'Up']   = []
                       syst_df_map[sample_obj.sample_set][syst+'Down'] = []
-        else: #use the actual sample key rather than the key for the set as in above
+        else: #use the actual sample key rather than the key for the sample_set/process as in above
             for sample_obj in self.samples.values():
                 if sample_obj.label=='background':
                     for syst in self.systematics.keys():
@@ -286,13 +295,14 @@ class Plotter(object):
                     print 'reading systematic %s for sample %s' %(sample_name, syst)
                     up_tree            = input_file[syst_obj.up_tree]
                     up_df              = up_tree.pandas.df(self.var_names+['weight'])
+                    up_df['weight']    *= float(sample_obj.lumi) 
 
-                    up_df['weight']   *= (float(sample_obj.lumi) * float(sample_obj.scale))
                     if len(self.options.reweight_var)!=0: 
-                        up_df = self.apply_reweighting(self.options.reweight_var,
-                                                       self.rew_scale_factors, 
-                                                       self.rew_bin_edges, 
-                                                       up_df)
+                        up_df = self.apply_reweighting( self.options.reweight_var,
+                                                        self.rew_scale_factors, 
+                                                        self.rew_bin_edges,
+                                                        up_df)
+                    else: up_df['weight'] *= float(sample_obj.scale)
 
                     if self.options.concat_years:
                         syst_df_map[sample_obj.sample_set][syst+'Up'].append(up_df)
@@ -302,12 +312,13 @@ class Plotter(object):
 
                     down_tree          = input_file[syst_obj.down_tree]
                     down_df            = down_tree.pandas.df(self.var_names+['weight'])
-                    down_df['weight'] *= (float(sample_obj.lumi) * float(sample_obj.scale))
+                    down_df['weight'] *= float(sample_obj.lumi) 
                     if len(self.options.reweight_var)!=0: 
                         down_df = self.apply_reweighting(self.options.reweight_var,
                                                          self.rew_scale_factors,
                                                          self.rew_bin_edges,
                                                          down_df)
+                    else: down_df['weight'] *= float(sample_obj.scale)
 
                     if self.options.concat_years:
                         syst_df_map[sample_obj.sample_set][syst+'Down'].append(down_df)
@@ -354,9 +365,8 @@ class Plotter(object):
         if len( self.syst_df_map) != 0: 
             self.plot_systematics(cut_string, axes, variable, bins)
 
-        #default axes dont have enough whitespace above plots, so add more. also set logy here
-        # (not in hists where you will get weird behaviour if y~0)
-
+        #default axes dont have enough whitespace above plots, so add more. 
+        #also set logy here and not when filling hists, or else you get weird behaviour if y~0
         if self.options.ratio_plot: 
             axes = axes[0]
         axes.legend(loc='upper right', bbox_to_anchor=(0.94,0.94)) 
@@ -456,10 +466,13 @@ class Plotter(object):
             var_to_plot       = bkg_frame_cut[variable.name].values
             var_weights       = bkg_frame_cut['weight'].values 
 
-            sumw, _           = np.histogram(var_to_plot, bins=bins, weights=var_weights)
-            sumw2, _          = np.histogram(var_to_plot, bins=bins, weights=var_weights**2)
             #FIXME: store this in dict, inside systematics object
-            stat_down, stat_up = self.poisson_interval(sumw, sumw2)
+            sumw, _                   = np.histogram(var_to_plot, bins=bins, weights=var_weights)
+            self.mc_totals[sample_id] = sumw
+            sumw2, _                  = np.histogram(var_to_plot, bins=bins, weights=var_weights**2)
+            stat_down, stat_up        = self.poisson_interval(sumw, sumw2)
+            self.mc_stat_uncs[sample_id]   = [(sumw-stat_down), (stat_up-sumw)]
+
             print '--> Integral of hist: %s, for sample: %s, is: %.2f' % (variable.name,sample_id,np.sum(sumw))
 
             #FIXME: if: add options to stack backgrounds!
@@ -478,6 +491,8 @@ class Plotter(object):
                     stat_up     /= np.sum(sumw)
                 axes.hist(var_to_plot, bins=bins, label=sample_id, weights=var_weights, 
                           color=self.colour_sample_map[sample_id], histtype='stepfilled')
+
+                #required for comparing to each systematic flucatuation
 
                 #if we have multiple bkgs that we dont want to stack, we can't define a ratio plot i.e. Data/ which bkg? so build this in below
                 if self.options.ratio_plot:
@@ -499,6 +514,8 @@ class Plotter(object):
                             color=colour_stack, histtype='stepfilled', stacked=True)
             
             mc_stack_binned, _   = np.histogram(np.concatenate(var_stack), bins=bins, weights=np.concatenate(weight_stack))
+
+            
             data_bkg_ratio     = data_binned/mc_stack_binned
             ratio_canv.errorbar( bin_centres, data_bkg_ratio, yerr=[(data_binned-data_stat_down_up[0])/sumw,(data_stat_down_up[1] - data_binned)/sumw], fmt='o', ms=4, color='black', capsize=0, zorder=3)
 
@@ -512,7 +529,7 @@ class Plotter(object):
         if variable.norm: axes[0].set_ylabel('1/N dN/d(%s) /%.2f' % (variable.xlabel,x_err), size=14)
         axes[0].text(0, 1.005, r'\textbf{CMS}', ha='left', va='bottom', transform=axes[0].transAxes, size=16)           
         axes[0].text(0.13, 1.005, r'\emph{%s}'%self.options.cms_label, ha='left', va='bottom', transform=axes[0].transAxes, size=14)           
-        axes[0].text(1, 1.005, r'%.0f~fb$^{-1}$ (13 TeV)'%self.options.total_lumi, ha='right', va='bottom', transform=axes[0].transAxes, size=14)
+        axes[0].text(1, 1.005, r'%.0f~fb$^{-1}$ %s'%(self.options.total_lumi, self.options.energy_label), ha='right', va='bottom', transform=axes[0].transAxes, size=14)
         #if variable.norm: axes[0].set_ylabel('1/N dN/d(%s) /%.2f' % (variable.xlabel,x_err, ha='right', y=1)
        
        
@@ -526,16 +543,129 @@ class Plotter(object):
     #--------------------------------------------------------------
 
     def plot_systematics(self, cut_string, axes, variable, bins):
-        if self.options.ratio_plot:
-            ratio_panel = axes[1]
-            axes = axes[0] 
 
-        for sample_id, syst_dict in self.syst_df_map.iteritems():
-            for syst_name, syst_df  in syst_dict.iteritems():
+        #set up dict keys
+        true_syst_variations = {}
+        print 'DEBUG'
+        for proc, syst_dicts  in self.syst_df_map.iteritems():
+          for syst_name in syst_dicts.keys():
+            print 'sumW for systematic: %s '%syst_name
+            test_df = self.syst_df_map[proc][syst_name].query(cut_string)
+            print np.sum(test_df['weight'])
+        print 'END DEBUG'
+
+        for proc, syst_dicts in self.syst_df_map.iteritems():
+            true_syst_variations[proc] = {}
+             
+            for syst_name, syst_df in syst_dicts.iteritems():
                 syst_df_cut = syst_df.query(cut_string)
 
-        #FIXME: use multiple functions to handle systemtic variations, 
-        #FIXME  and append results to attributes of a systematics class!
+                var_to_plot     = syst_df_cut[variable.name].values
+                weight          = syst_df_cut['weight'].values
+                isyst_binned, _ = np.histogram(var_to_plot, bins=bins, weights=weight)
+                #compare variation to the nominal for given sample and fill bin list
+                #can probably do using numpy and not loop through the arrays i.e. arr1>arr2 mask and then fill
+                true_up_variations    = []
+                true_down_variations  = []
+
+                #compare the systematic change to the nominal bin entries for that proc.
+
+                for ybin_syst, ybin_nominal in zip(isyst_binned, self.mc_totals[proc]):
+                  if ybin_syst > ybin_nominal: 
+                    true_up_variations.append(ybin_syst - ybin_nominal)
+                    true_down_variations.append(0)
+                  elif ybin_syst < ybin_nominal:
+                    true_down_variations.append(ybin_syst - ybin_nominal)
+                    true_up_variations.append(0)
+                  else: #sometimes in low stat cases we get no change either way wrt nominal
+                    true_up_variations.append(0)
+                    true_down_variations.append(0)
+                true_syst_variations[proc][syst_name] = [np.asarray(true_down_variations),
+                                                         np.asarray(true_up_variations)]
+        
+        #add all the up/down variations (separately)for each systematic in quadrature for each bin, 
+        #for each proc
+        summed_true_syst_variations = {}
+        for proc, systdict_to_downuplist in true_syst_variations.iteritems():
+            down_squares = [] 
+            up_squares   = [] 
+            for syst, down_up_list in systdict_to_downuplist.iteritems():
+                down_squares.append( down_up_list[0]**2 )
+                up_squares.append( down_up_list[1]**2 )
+            #now add up the each bin that has been squared (will add element wise since np array, not list :) )
+            syst_merged_downs = np.zeros(len(down_up_list[0]))
+            syst_merged_ups   = np.zeros(len(down_up_list[1]))
+            for down_array in down_squares:
+              syst_merged_downs += down_array
+            for up_array in up_squares:
+              syst_merged_ups   += up_array
+            summed_true_syst_variations[proc] = [np.sqrt(syst_merged_downs), np.sqrt(syst_merged_ups)]
+
+
+        syst_plus_stat_variations = {}
+        for proc, syst_merged_down_up_list in summed_true_syst_variations.iteritems():
+          syst_plus_stat_variations[proc] = []
+          syst_plus_stat_variations[proc].append( np.sqrt( syst_merged_down_up_list[0]**2 + self.mc_stat_uncs[proc][0]**2) )
+          syst_plus_stat_variations[proc].append( np.sqrt( syst_merged_down_up_list[1]**2 + self.mc_stat_uncs[proc][1]**2) )
+            
+        #4) merged==across procs i.e. stacked
+        #FIXME: only do this is we have more than 1 proc i.e. merge systs across procks
+        merged_downs = np.zeros(len(syst_merged_down_up_list[0]))
+        merged_ups   = np.zeros(len(syst_merged_down_up_list[1]))
+        for total_up_down_list in syst_plus_stat_variations.values():
+          merged_downs += total_up_down_list[0]**2
+          merged_ups   += total_up_down_list[1]**2
+            
+        final_down = np.sqrt(merged_downs)
+        final_up = np.sqrt(merged_ups)
+            
+        print 'finished computing systematics'
+        print 
+ 
+        #do the drawing           
+        if self.options.ratio_plot:
+            ratio_canv  = axes[1]
+            axes        = axes[0] 
+        total_mc = np.zeros(len(bins)-1) # n_bins = n_bin_edges -1 
+        for sumw in self.mc_totals.values():
+          total_mc += sumw
+
+        up_yield   = total_mc + final_up
+        #FIXME: fix this niche issue below with poiss err function
+        up_yield[up_yield==np.inf] = 0
+        down_yield = total_mc - final_down
+
+        axes.fill_between(bins, list(down_yield)+[down_yield[-1]], list(up_yield)+[up_yield[-1]], alpha=0.3, step="post", color="lightcoral", lw=0, zorder=4, label='Simulation stat. $\oplus$ syst. unc.')
+        if self.options.ratio_plot:
+          sigma_tot_ratio_up   = final_up/total_mc
+          sigma_tot_ratio_down = final_down/total_mc
+                  
+          #NOTE:below is for error in ratio (i.e. including error in data propped into ratio ratio that kept sep)
+
+          ratio_up_excess      = np.ones(len(total_mc)) + sigma_tot_ratio_up
+          ratio_down_excess    = np.ones(len(total_mc)) - sigma_tot_ratio_down
+                  
+          #1. if we have no entries, the upper limit is inf and lower is nan
+          #2. hence we set both to nan, so they aren't plot in the ratio plot
+          #3  BUT if we have [nan, nan, 1 ,2 ,,, ] and/or [1, 2, ... nan, nan] 
+          #   i.e. multiple Nan's at each end, then we have to set to Nan closest
+          #   to the filled numbers to 1, such that error on the closest filled value
+          #   doesn't mysteriously disappear
+          #EDIT: gave up and did this dumb fix:
+          ratio_up_excess[ratio_up_excess==np.inf] = 1 
+          ratio_down_excess = np.nan_to_num(ratio_down_excess)
+          ratio_down_excess[ratio_down_excess==0] =1
+        
+          if self.options.ratio_plot:
+             ratio_canv.fill_between(bins, list(ratio_up_excess)+[ratio_up_excess[-1]], list(ratio_down_excess)+[ratio_down_excess[-1]], alpha=0.3, step="post", color="lightcoral", lw=1 , zorder=2)
+
+
+        #FIXME: add this option
+        if self.options.stack_bkgs: pass
+        #sum up bins from all samples (already done above but in another fn)
+        #FIXME else draw variations on the sum from each sample
+        else: pass
+
 
     #--------------------------------------------------------------
         
