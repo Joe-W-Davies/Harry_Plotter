@@ -104,18 +104,23 @@ class Options(object):
             'reweight_var'       : '',
             'reweight_samp_mc'   : '',
             'reweight_samp_data' : '',
-            'stack_bkgs'         : False,
-            'var_list '          : []
+            'stack_bkgs'         : False
 
         }
         self.__dict__  = self.template
         self.__dict__.update(options)
-        self.total_lumi          = 137 #FIXME: update based on the set of lumis that are provided in json config
 
     #def __repr__(): pass
 
-    def print_options(self):
-        pass
+    def print_options(self, title_length, divider):
+        print '|' + 'Options'.center(title_length) + '|'
+        print divider
+        for option, value in self.__dict__.iteritems():
+    	    print '|' + (option+' = '+str(value)).ljust(title_length) + '|'
+
+        #for option, value in self.__dict__.iteritems()
+        #    print 
+
       
 #--------------------------------------------------------------------------------------
 
@@ -135,6 +140,7 @@ class Plotter(object):
         self.sample_sets         = set() #unique set of name that span years i.e. processes
         self.sample_years        = set() 
         self.sample_labels       = set() 
+        self.sample_lumis        = set() 
         self.signal_df_map       = {} 
         self.bkg_df_map          = {} 
         self.data_df_map         = {} 
@@ -172,8 +178,10 @@ class Plotter(object):
                     self.sample_sets.add(sample.sample_set)
                     self.sample_years.add(sample.year)
                     self.colour_sample_map[sample.sample_set] = sample.colour
+                    self.sample_lumis.add(float(sample.lumi))
                 self.samples = samples
 
+        print self.sample_lumis
     def trees_to_dfs(self):
         """
         Function to read in files for each sample and convert to a DataFrame.
@@ -545,7 +553,7 @@ class Plotter(object):
         if variable.norm: axes[0].set_ylabel('1/N dN/d(%s) /%.2f' % (variable.xlabel,x_err), size=14)
         axes[0].text(0, 1.005, r'\textbf{CMS}', ha='left', va='bottom', transform=axes[0].transAxes, size=16)           
         axes[0].text(0.13, 1.005, r'\emph{%s}'%self.options.cms_label, ha='left', va='bottom', transform=axes[0].transAxes, size=14)           
-        axes[0].text(1, 1.005, r'%.0f~fb$^{-1}$ %s'%(self.options.total_lumi, self.options.energy_label), ha='right', va='bottom', transform=axes[0].transAxes, size=14)
+        axes[0].text(1, 1.005, r'%.1f~fb$^{-1}$ %s'%(sum(self.sample_lumis), self.options.energy_label), ha='right', va='bottom', transform=axes[0].transAxes, size=14)
         #if variable.norm: axes[0].set_ylabel('1/N dN/d(%s) /%.2f' % (variable.xlabel,x_err, ha='right', y=1)
        
        
@@ -572,11 +580,8 @@ class Plotter(object):
 
 
         for sample, sample_obj in self.samples.iteritems():
-            print 'sample is: %s   ' %sample
-            print 'sample label: %s' %sample_obj.label
             if sample_obj.label == 'background':
                 for syst_name, syst_obj in sample_obj.systematics.iteritems():
-                    print 'syst: %s' % syst_name
                     both_syst_frames = {}
                     both_syst_frames['Down'] = syst_obj.down_frame.query(cut_string)
                     both_syst_frames['Up']   = syst_obj.up_frame.query(cut_string)
@@ -657,64 +662,106 @@ class Plotter(object):
                 sample_obj.systematics['merged_systs'] = merged_syst_obj 
 
             
-        #4) merge systs (already merged across systs) across procs
+        #4) merge combined systs across procs id we are stacking them. else (see below)
         
-        merged_downs = np.zeros(len(bins)-1)
-        merged_ups   = np.zeros(len(bins)-1)
-        for sample, sample_obj in self.samples.iteritems():
-            if sample_obj.label == 'background':
-                merged_downs += (sample_obj.systematics['merged_systs'].merged_syst_stat_down)**2
-                merged_ups   += (sample_obj.systematics['merged_systs'].merged_syst_stat_up)**2
+        if self.options.stack_bkgs: #add uncertanties across samples and plot a single band (inc on ratio plot)
+            merged_downs = np.zeros(len(bins)-1)
+            merged_ups   = np.zeros(len(bins)-1)
+            for sample, sample_obj in self.samples.iteritems():
+                if sample_obj.label == 'background':
+                    merged_downs += (sample_obj.systematics['merged_systs'].merged_syst_stat_down)**2
+                    merged_ups   += (sample_obj.systematics['merged_systs'].merged_syst_stat_up)**2
 
+            final_down = np.sqrt(merged_downs)
+            final_up = np.sqrt(merged_ups)
+
+            #do the drawing           
+            if self.options.ratio_plot:
+                ratio_canv  = axes[1]
+                axes        = axes[0] 
+
+            total_mc = np.zeros(len(bins)-1) # n_bins = n_bin_edges -1 
+            for sumw in self.mc_totals.values():
+              total_mc += sumw
+
+            up_yield   = total_mc + final_up
+            #FIXME: fix this niche issue below with poiss err function
+            up_yield[up_yield==np.inf] = 0
+            down_yield = total_mc - final_down
+
+            axes.fill_between(bins, list(down_yield)+[down_yield[-1]], list(up_yield)+[up_yield[-1]], alpha=0.3, step="post", color="lightcoral", lw=0, zorder=4, label='Simulation stat. $\oplus$ syst. unc.')
+            if self.options.ratio_plot:
+              sigma_tot_ratio_up   = final_up/total_mc
+              sigma_tot_ratio_down = final_down/total_mc
+                      
+              #NOTE:below is for error in ratio (i.e. including error in data propped into ratio ratio that kept sep)
+              ratio_up_excess      = np.ones(len(total_mc)) + sigma_tot_ratio_up
+              ratio_down_excess    = np.ones(len(total_mc)) - sigma_tot_ratio_down
+                      
+              #1. if we have no entries, the upper limit is inf and lower is nan
+              #2. hence we set both to nan, so they aren't plot in the ratio plot
+              #3  BUT if we have [nan, nan, 1 ,2 ,,, ] and/or [1, 2, ... nan, nan] 
+              #   i.e. multiple Nan's at each end, then we have to set to Nan closest
+              #   to the filled numbers to 1, such that error on the closest filled value
+              #   doesn't mysteriously disappear
+              #EDIT: gave up and did this dumb fix:
+
+              ratio_up_excess[ratio_up_excess==np.inf] = 1 
+              ratio_down_excess = np.nan_to_num(ratio_down_excess)
+              ratio_down_excess[ratio_down_excess==0] =1
             
-        final_down = np.sqrt(merged_downs)
-        final_up = np.sqrt(merged_ups)
+              ratio_canv.fill_between(bins, list(ratio_up_excess)+[ratio_up_excess[-1]], list(ratio_down_excess)+[ratio_down_excess[-1]], alpha=0.3, step="post", color="lightcoral", lw=1 , zorder=2)
 
- 
-        #do the drawing           
-        if self.options.ratio_plot:
-            ratio_canv  = axes[1]
-            axes        = axes[0] 
+        #5) if not stacking keep uncertainties associated to their owns sample i.e. loop through sample objects. This also means we wont drawing a ratio plot...
+        #NOTE: however that if we have one proc we can still defnie a ratio plot, so take care to account for this below
+        else: 
+            #do the drawing           
+            if self.options.ratio_plot:
+                ratio_canv  = axes[1]
+                axes        = axes[0] 
 
-        total_mc = np.zeros(len(bins)-1) # n_bins = n_bin_edges -1 
-        for sumw in self.mc_totals.values():
-          total_mc += sumw
-
-        up_yield   = total_mc + final_up
-        #FIXME: fix this niche issue below with poiss err function
-        up_yield[up_yield==np.inf] = 0
-        down_yield = total_mc - final_down
-
-        axes.fill_between(bins, list(down_yield)+[down_yield[-1]], list(up_yield)+[up_yield[-1]], alpha=0.3, step="post", color="lightcoral", lw=0, zorder=4, label='Simulation stat. $\oplus$ syst. unc.')
-        if self.options.ratio_plot:
-          sigma_tot_ratio_up   = final_up/total_mc
-          sigma_tot_ratio_down = final_down/total_mc
-                  
-          #NOTE:below is for error in ratio (i.e. including error in data propped into ratio ratio that kept sep)
-          ratio_up_excess      = np.ones(len(total_mc)) + sigma_tot_ratio_up
-          ratio_down_excess    = np.ones(len(total_mc)) - sigma_tot_ratio_down
-                  
-          #1. if we have no entries, the upper limit is inf and lower is nan
-          #2. hence we set both to nan, so they aren't plot in the ratio plot
-          #3  BUT if we have [nan, nan, 1 ,2 ,,, ] and/or [1, 2, ... nan, nan] 
-          #   i.e. multiple Nan's at each end, then we have to set to Nan closest
-          #   to the filled numbers to 1, such that error on the closest filled value
-          #   doesn't mysteriously disappear
-          #EDIT: gave up and did this dumb fix:
-
-          ratio_up_excess[ratio_up_excess==np.inf] = 1 
-          ratio_down_excess = np.nan_to_num(ratio_down_excess)
-          ratio_down_excess[ratio_down_excess==0] =1
-        
-          if self.options.ratio_plot:
-             ratio_canv.fill_between(bins, list(ratio_up_excess)+[ratio_up_excess[-1]], list(ratio_down_excess)+[ratio_down_excess[-1]], alpha=0.3, step="post", color="lightcoral", lw=1 , zorder=2)
+            for sample, sample_obj in self.samples.iteritems():
+                if sample_obj.label == 'background':
 
 
-        #FIXME: add this option
-        if self.options.stack_bkgs: pass
-        #sum up bins from all samples (already done above but in another fn)
-        #FIXME else draw variations on the sum from each sample
-        else: pass
+                        merged_downs = sample_obj.systematics['merged_systs'].merged_syst_stat_down
+                        merged_ups   = sample_obj.systematics['merged_systs'].merged_syst_stat_up
+
+                        up_yield   = self.mc_totals[sample] + merged_ups
+                        #FIXME: fix this niche issue below with poiss err function
+                        up_yield[up_yield==np.inf] = 0
+                        down_yield = self.mc_totals[sample] - merged_downs
+
+                        axes.fill_between(bins, list(down_yield)+[down_yield[-1]], list(up_yield)+[up_yield[-1]], alpha=0.3, step="post", color="lightcoral", lw=0, zorder=4, label='Simulation stat. $\oplus$ syst. unc.')
+
+                        if (self.options.ratio_plot) and (len(self.bkg_df_map.keys()) == 1):
+                            total_mc             = sum(self.mc_totals.values()) #only one bkg sample so no need to loop over dict
+                            sigma_tot_ratio_up   = merged_ups/total_mc
+                            sigma_tot_ratio_down = merged_downs/total_mc
+                                    
+                            ratio_up_excess      = np.ones(len(total_mc)) + sigma_tot_ratio_up
+                            ratio_down_excess    = np.ones(len(total_mc)) - sigma_tot_ratio_down
+                                    
+                            #1. if we have no entries, the upper limit is inf and lower is nan
+                            #2. hence we set both to nan, so they aren't plot in the ratio plot
+                            #3  BUT if we have [nan, nan, 1 ,2 ,,, ] and/or [1, 2, ... nan, nan] 
+                            #   i.e. multiple Nan's at each end, then we have to set to Nan closest
+                            #   to the filled numbers to 1, such that error on the closest filled value
+                            #   doesn't mysteriously disappear
+                            #EDIT: gave up and did this dumb fix:
+
+                            ratio_up_excess[ratio_up_excess==np.inf] = 1 
+                            ratio_down_excess = np.nan_to_num(ratio_down_excess)
+                            ratio_down_excess[ratio_down_excess==0] =1
+            
+                            ratio_canv.fill_between(bins, list(ratio_up_excess)+[ratio_up_excess[-1]], list(ratio_down_excess)+[ratio_down_excess[-1]], alpha=0.3, step="post", color="lightcoral", lw=1 , zorder=2)
+
+                        else: raise Exception("Requested a ratio plot, but have given more than one background. Did you mean to set option 'stack_backgrounds' = True? ")
+                          
+                          
+
+                
+
 
 
     #--------------------------------------------------------------
@@ -732,9 +779,84 @@ class Plotter(object):
 
     #--------------------------------------------------------------
 
-    def print_cuts(self):
-        print self.cut_map
-        #FIXME: make this into a nice format for printing
+    def print_cuts(self, line_length):
+        cut_list_non_null = [cut for cut in self.cut_map.values() if cut != '']
+        for cut in self.cut_map.values():
+            if cut!='': print '|' + cut.ljust(line_length) + '|'
+    #FIXME: make this into a nice format for printing
+
+    #--------------------------------------------------------------
+
+    def print_plotting_info(self):
+        #title is 60 spaces, divider is 62 spaces
+        #so if you want to add '*' or other symbols at the start/end of a line
+        #use the title length 
+        
+        title = 'Plotting Info'.center(76)
+        divider = '+' + '-'*(len(title)) + '+'
+
+
+        print 
+        print '*'*len(divider)
+        print '*' + title + '*'
+
+        print '-'*len(divider)
+
+        print '|'+'Variables'.center(len(title))+'|'
+
+        print divider 
+
+        for var in self.var_names:
+    	    print '|' + var.ljust(len(title)) + '|'
+
+        print divider
+
+        print '|'+'Cuts'.center(len(title))+'|'
+        print divider
+        self.print_cuts(len(title))
+
+        print divider
+
+        self.options.print_options(len(title), divider)
+       
+        print divider
+
+        if len(self.syst_tree_name_map)!=0:
+            print '|'+'Systematic trees'.center(len(title))+'|'
+            print divider
+            for syst, tree_paths in self.syst_tree_name_map.iteritems():
+                print '|'+(syst+':').ljust(len(title))+'|'
+                print '|'+ ('  Up:  '+ str(tree_paths[0])).ljust(len(title)) + '|'
+                print '|'+ ('  Down:'+ str(tree_paths[1])).ljust(len(title)) + '|'
+
+        print divider
+
+        print '|'+'Samples'.center(len(title))+'|'
+        print divider
+        self.print_samples(len(title), divider)
+
+        print divider
+        print '*' + 'End of Plotting Info'.center(76) + '*'
+        print '*'*len(divider)
+       
+
+    def print_samples(self, title_length, divider):
+        bkgs = [sample_obj for sample_obj in self.samples.values() if sample_obj.label == 'background']    
+        sigs = [sample_obj for sample_obj in self.samples.values() if sample_obj.label == 'signal']    
+        data = [sample_obj for sample_obj in self.samples.values() if sample_obj.label == 'data']    
+
+        print '|' + 'Signal samples:'.ljust(title_length) + '|'
+        for sig in sigs:
+    	    print '|' + ('  name: '+sig.name+', set: '+sig.sample_set).ljust(title_length) + '|'
+        print '|' + (''.ljust(title_length)) + '|'
+        print '|' + 'Background samples:'.ljust(title_length) + '|'
+        for bkg in bkgs:
+    	    print '|' + ('  name: '+bkg.name+', set: '+bkg.sample_set).ljust(title_length) + '|'
+        print '|' + (''.ljust(title_length)) + '|'
+        print '|' + 'Data samples:'.ljust(title_length) + '|'
+        for dat in data:
+    	    print '|' + ('  name: '+dat.name+', set: '+dat.sample_set).ljust(title_length) + '|'
+    
 
     #--------------------------------------------------------------
 
