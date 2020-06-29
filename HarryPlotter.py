@@ -570,8 +570,6 @@ class Plotter(object):
 
         #sample.systematics = {'syst_1_name': syst_object, 'syst_2_name': syst_object } 
 
-        print 'sample dict for the reader class is'
-        print self.samples
 
         for sample, sample_obj in self.samples.iteritems():
             print 'sample is: %s   ' %sample
@@ -603,15 +601,6 @@ class Plotter(object):
                           else: #sometimes in low stat cases we get no change either way wrt nominal
                             true_up_variations.append(0)
                             true_down_variations.append(0)
-                        print
-                        print 'DEBUG: PART A'
-                        print 'nominal variations'
-                        print self.mc_totals[sample]
-                        print 'true up variations'
-                        print true_up_variations
-                        print 'true down variations'
-                        print true_down_variations
-                        print
                           
 
                         #FIX: we need a new atriibute for the syst class linking the true fluctuations
@@ -681,13 +670,6 @@ class Plotter(object):
         final_down = np.sqrt(merged_downs)
         final_up = np.sqrt(merged_ups)
 
-        print 'final downs:'
-        print final_down      
-        print 'final ups:'
-        print final_up      
-            
-        print 'finished computing systematics'
-        print 
  
         #do the drawing           
         if self.options.ratio_plot:
@@ -697,9 +679,6 @@ class Plotter(object):
         total_mc = np.zeros(len(bins)-1) # n_bins = n_bin_edges -1 
         for sumw in self.mc_totals.values():
           total_mc += sumw
-
-        print 'summed mc'
-        print total_mc
 
         up_yield   = total_mc + final_up
         #FIXME: fix this niche issue below with poiss err function
