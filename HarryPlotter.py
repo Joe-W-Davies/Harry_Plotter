@@ -109,7 +109,6 @@ class Options(object):
         }
         self.__dict__  = self.template
         self.__dict__.update(options)
-        self.lumis               = set() #unique set of name that span years i.e. processes
 
     #def __repr__(): pass
 
@@ -663,64 +662,106 @@ class Plotter(object):
                 sample_obj.systematics['merged_systs'] = merged_syst_obj 
 
             
-        #4) merge systs (already merged across systs) across procs
+        #4) merge combined systs across procs id we are stacking them. else (see below)
         
-        merged_downs = np.zeros(len(bins)-1)
-        merged_ups   = np.zeros(len(bins)-1)
-        for sample, sample_obj in self.samples.iteritems():
-            if sample_obj.label == 'background':
-                merged_downs += (sample_obj.systematics['merged_systs'].merged_syst_stat_down)**2
-                merged_ups   += (sample_obj.systematics['merged_systs'].merged_syst_stat_up)**2
+        if self.options.stack_bkgs: #add uncertanties across samples and plot a single band (inc on ratio plot)
+            merged_downs = np.zeros(len(bins)-1)
+            merged_ups   = np.zeros(len(bins)-1)
+            for sample, sample_obj in self.samples.iteritems():
+                if sample_obj.label == 'background':
+                    merged_downs += (sample_obj.systematics['merged_systs'].merged_syst_stat_down)**2
+                    merged_ups   += (sample_obj.systematics['merged_systs'].merged_syst_stat_up)**2
 
+            final_down = np.sqrt(merged_downs)
+            final_up = np.sqrt(merged_ups)
+
+            #do the drawing           
+            if self.options.ratio_plot:
+                ratio_canv  = axes[1]
+                axes        = axes[0] 
+
+            total_mc = np.zeros(len(bins)-1) # n_bins = n_bin_edges -1 
+            for sumw in self.mc_totals.values():
+              total_mc += sumw
+
+            up_yield   = total_mc + final_up
+            #FIXME: fix this niche issue below with poiss err function
+            up_yield[up_yield==np.inf] = 0
+            down_yield = total_mc - final_down
+
+            axes.fill_between(bins, list(down_yield)+[down_yield[-1]], list(up_yield)+[up_yield[-1]], alpha=0.3, step="post", color="lightcoral", lw=0, zorder=4, label='Simulation stat. $\oplus$ syst. unc.')
+            if self.options.ratio_plot:
+              sigma_tot_ratio_up   = final_up/total_mc
+              sigma_tot_ratio_down = final_down/total_mc
+                      
+              #NOTE:below is for error in ratio (i.e. including error in data propped into ratio ratio that kept sep)
+              ratio_up_excess      = np.ones(len(total_mc)) + sigma_tot_ratio_up
+              ratio_down_excess    = np.ones(len(total_mc)) - sigma_tot_ratio_down
+                      
+              #1. if we have no entries, the upper limit is inf and lower is nan
+              #2. hence we set both to nan, so they aren't plot in the ratio plot
+              #3  BUT if we have [nan, nan, 1 ,2 ,,, ] and/or [1, 2, ... nan, nan] 
+              #   i.e. multiple Nan's at each end, then we have to set to Nan closest
+              #   to the filled numbers to 1, such that error on the closest filled value
+              #   doesn't mysteriously disappear
+              #EDIT: gave up and did this dumb fix:
+
+              ratio_up_excess[ratio_up_excess==np.inf] = 1 
+              ratio_down_excess = np.nan_to_num(ratio_down_excess)
+              ratio_down_excess[ratio_down_excess==0] =1
             
-        final_down = np.sqrt(merged_downs)
-        final_up = np.sqrt(merged_ups)
+              ratio_canv.fill_between(bins, list(ratio_up_excess)+[ratio_up_excess[-1]], list(ratio_down_excess)+[ratio_down_excess[-1]], alpha=0.3, step="post", color="lightcoral", lw=1 , zorder=2)
 
- 
-        #do the drawing           
-        if self.options.ratio_plot:
-            ratio_canv  = axes[1]
-            axes        = axes[0] 
+        #5) if not stacking keep uncertainties associated to their owns sample i.e. loop through sample objects. This also means we wont drawing a ratio plot...
+        #NOTE: however that if we have one proc we can still defnie a ratio plot, so take care to account for this below
+        else: 
+            #do the drawing           
+            if self.options.ratio_plot:
+                ratio_canv  = axes[1]
+                axes        = axes[0] 
 
-        total_mc = np.zeros(len(bins)-1) # n_bins = n_bin_edges -1 
-        for sumw in self.mc_totals.values():
-          total_mc += sumw
-
-        up_yield   = total_mc + final_up
-        #FIXME: fix this niche issue below with poiss err function
-        up_yield[up_yield==np.inf] = 0
-        down_yield = total_mc - final_down
-
-        axes.fill_between(bins, list(down_yield)+[down_yield[-1]], list(up_yield)+[up_yield[-1]], alpha=0.3, step="post", color="lightcoral", lw=0, zorder=4, label='Simulation stat. $\oplus$ syst. unc.')
-        if self.options.ratio_plot:
-          sigma_tot_ratio_up   = final_up/total_mc
-          sigma_tot_ratio_down = final_down/total_mc
-                  
-          #NOTE:below is for error in ratio (i.e. including error in data propped into ratio ratio that kept sep)
-          ratio_up_excess      = np.ones(len(total_mc)) + sigma_tot_ratio_up
-          ratio_down_excess    = np.ones(len(total_mc)) - sigma_tot_ratio_down
-                  
-          #1. if we have no entries, the upper limit is inf and lower is nan
-          #2. hence we set both to nan, so they aren't plot in the ratio plot
-          #3  BUT if we have [nan, nan, 1 ,2 ,,, ] and/or [1, 2, ... nan, nan] 
-          #   i.e. multiple Nan's at each end, then we have to set to Nan closest
-          #   to the filled numbers to 1, such that error on the closest filled value
-          #   doesn't mysteriously disappear
-          #EDIT: gave up and did this dumb fix:
-
-          ratio_up_excess[ratio_up_excess==np.inf] = 1 
-          ratio_down_excess = np.nan_to_num(ratio_down_excess)
-          ratio_down_excess[ratio_down_excess==0] =1
-        
-          if self.options.ratio_plot:
-             ratio_canv.fill_between(bins, list(ratio_up_excess)+[ratio_up_excess[-1]], list(ratio_down_excess)+[ratio_down_excess[-1]], alpha=0.3, step="post", color="lightcoral", lw=1 , zorder=2)
+            for sample, sample_obj in self.samples.iteritems():
+                if sample_obj.label == 'background':
 
 
-        #FIXME: add this option
-        if self.options.stack_bkgs: pass
-        #sum up bins from all samples (already done above but in another fn)
-        #FIXME else draw variations on the sum from each sample
-        else: pass
+                        merged_downs = sample_obj.systematics['merged_systs'].merged_syst_stat_down
+                        merged_ups   = sample_obj.systematics['merged_systs'].merged_syst_stat_up
+
+                        up_yield   = self.mc_totals[sample] + merged_ups
+                        #FIXME: fix this niche issue below with poiss err function
+                        up_yield[up_yield==np.inf] = 0
+                        down_yield = self.mc_totals[sample] - merged_downs
+
+                        axes.fill_between(bins, list(down_yield)+[down_yield[-1]], list(up_yield)+[up_yield[-1]], alpha=0.3, step="post", color="lightcoral", lw=0, zorder=4, label='Simulation stat. $\oplus$ syst. unc.')
+
+                        if (self.options.ratio_plot) and (len(self.bkg_df_map.keys()) == 1):
+                            total_mc             = sum(self.mc_totals.values()) #only one bkg sample so no need to loop over dict
+                            sigma_tot_ratio_up   = merged_ups/total_mc
+                            sigma_tot_ratio_down = merged_downs/total_mc
+                                    
+                            ratio_up_excess      = np.ones(len(total_mc)) + sigma_tot_ratio_up
+                            ratio_down_excess    = np.ones(len(total_mc)) - sigma_tot_ratio_down
+                                    
+                            #1. if we have no entries, the upper limit is inf and lower is nan
+                            #2. hence we set both to nan, so they aren't plot in the ratio plot
+                            #3  BUT if we have [nan, nan, 1 ,2 ,,, ] and/or [1, 2, ... nan, nan] 
+                            #   i.e. multiple Nan's at each end, then we have to set to Nan closest
+                            #   to the filled numbers to 1, such that error on the closest filled value
+                            #   doesn't mysteriously disappear
+                            #EDIT: gave up and did this dumb fix:
+
+                            ratio_up_excess[ratio_up_excess==np.inf] = 1 
+                            ratio_down_excess = np.nan_to_num(ratio_down_excess)
+                            ratio_down_excess[ratio_down_excess==0] =1
+            
+                            ratio_canv.fill_between(bins, list(ratio_up_excess)+[ratio_up_excess[-1]], list(ratio_down_excess)+[ratio_down_excess[-1]], alpha=0.3, step="post", color="lightcoral", lw=1 , zorder=2)
+
+                        else: raise Exception("Requested a ratio plot, but have given more than one background. Did you mean to set option 'stack_backgrounds' = True? ")
+                          
+                          
+
+                
+
 
 
     #--------------------------------------------------------------
