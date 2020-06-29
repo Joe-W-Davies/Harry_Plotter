@@ -38,6 +38,8 @@ if __name__ == '__main__':
         #        - read other options [function done]
         plotter = HP.Plotter(card.read(), output_dir= opt.out_dir )
         plotter.read()
+        plotter.print_plotting_info()
+
         #        - get trees for all samples and put them in df's []. takes account of concatting df's across years if we want to merge samples
         plotter.trees_to_dfs()
         # get trees for systematics and hold them in dicts. Takes account of concatting df's across years if we want to merge samples
