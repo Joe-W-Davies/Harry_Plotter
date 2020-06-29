@@ -35,7 +35,7 @@ class Variable(object):
         self.name     = name
         self.xlabel   = self.xlabel.replace('#', "\\")
 
-    def __repr__(): pass
+    #def __repr__(): pass
 
 #--------------------------------------------------------------------------------------
     
@@ -47,46 +47,47 @@ class Sample(object):
 
     def __init__(self, name, options={}):
         self.template={
-        'file_path'  : '',
-        'tree'       : '',
-        'order'      : None,
-        'label'      : '',
-        'lumi'       : 1.0,
-        'scale'      : 1.0,
-        'year'       : None,
-        'file_ext'   : '.root',
-        'sample_set' : '',
-        'colour'     : 'red'
+        'file_path'      : '',
+        'tree'           : '',
+        'order'          : None,
+        'label'          : '',
+        'lumi'           : 1.0,
+        'scale'          : 1.0,
+        'year'           : None,
+        'file_ext'       : '.root',
+        'sample_set'     : '',
+        'colour'         : 'red'
         }
-        self.__dict__ = self.template
+        self.__dict__    = self.template
         self.__dict__.update(options)
+        self.name        = name
+        self.label       = self.label.lower()
+        self.systematics = {} #dict of {syst:syst_obj}
+
         if self.file_path.endswith('/'): self.file_path = self.file_path[:-1]
-        self.name     = name
-        self.label    = self.label.lower()
         
-    def __repr__(): pass
+    #def __repr__(): pass
 
 
 
 #--------------------------------------------------------------------------------------
 
 class Systematic(object):
-    '''Object containing the systematic options'''
-    def __init__(self, name, options={}):
-        self.template = {
-            'up_tree'      : None,
-            'down_tree'    : None,
-            'up_histo'     : [],
-            'down_histo'   : [],
-            'true_up'      : {},
-            'true_down '   : {},
-            'names '       : []
-        }
-        self.__dict__  = self.template
-        self.__dict__.update(options)
-        self.name = name
-
-    def __repr__(): pass
+    '''Object containing atrtibues related to systematic variations
+       One object is created per systematic uncertainty, so that one
+       sample that may hold multiple variations contained in separate objects.
+    '''
+    def __init__(self, name, down_tree='', up_tree=''):
+            self.name                  = name
+            self.up_tree               = up_tree
+            self.down_tree             = down_tree
+            self.up_frame              = None
+            self.down_frame            = None
+            self.up_tree_binned        = [] #[true_downs, true_ups]
+            self.down_tree_binned      = [] #[true_downs, true_ups]
+            self.true_up               = {}
+            self.true_down             = {}
+    #def __repr__(): pass
 
 #--------------------------------------------------------------------------------------
 
@@ -111,7 +112,7 @@ class Options(object):
         self.__dict__.update(options)
         self.total_lumi          = 137 #FIXME: update based on the set of lumis that are provided in json config
 
-    def __repr__(): pass
+    #def __repr__(): pass
 
     def print_options(self):
         pass
@@ -125,7 +126,6 @@ class Plotter(object):
         self.card                = card 
         self.variables           = {}
         self.samples             = {} #all samples in { key:df } format
-        self.systematics         = {}
         self.options             = Options()
         self.ratio_range         = (0,2) #FIXME: could make changeable for each variable? (add att to var)
         self.cut_map             = {} 
@@ -142,7 +142,7 @@ class Plotter(object):
         self.rew_bin_edges       = np.array([])
         self.colour_sample_map   = {} 
         #FIXME: can probably put some of these attribues inside one systematic class object for each sample?
-        self.syst_df_map         = {} 
+        self.syst_tree_name_map  = {}
         self.mc_totals           = {} 
         self.mc_stat_uncs        = {} 
 
@@ -163,8 +163,7 @@ class Plotter(object):
                 self.options = opts
             if 'systematics' in key:
                 for syst_name, syst_options in config[key].iteritems():
-                    syst = Systematic(syst_name, syst_options)
-                    self.systematics[syst.name] = syst
+                    self.syst_tree_name_map[syst_name] = [syst_options['down_tree'], syst_options['up_tree']]
             if 'samples' in key:
                 samples = {}
                 for sample_name, sample_opts in config[key].iteritems():
@@ -183,7 +182,7 @@ class Plotter(object):
         The lists will then be concattenated across years i.e. flattened out
         Otherwise just store with one key per sample:
         {'sample_id_1' : df_1, 'sample_id_2' : ..., ...}
-        #Dictionaries are split into signal, background, and Data
+        Dictionaries are split into signal, background, and Data
         """
 
         sig_df_map  = {}
@@ -256,59 +255,40 @@ class Plotter(object):
     def systs_to_dfs(self):
         """
         Function to read in systs for each sample and convert to a DataFrame. 
-        Only reads systematics for processes labelled with bkg.
-        If concatting across years, hold dataframes in dict that looks like this: 
-        {'proc_1' : { 'syst_1_up'  : [syst_df_up_for_year_1, syst_df_up_for_year_2, ... ],
-                      'syst_1_down': [syst_df_down_for_year_1, syst_df_down_for_year_2, ... ], 
-                      'syst_2_up':   [...], ... 
-                    },
-         'proc_2' : {...},
-         ...
-         }
-        The lists  will then be concattenated across years i.e. flattened out
-        {'proc_1' : {syst_1_up : df, syst_1_down : df_down, syst_2_up: df_up, ...},
-         'proc_2' : {...}
-        }
-        If we dont want to concat across years, just store with one key per sample i.e. proc_names->sample_name
+        Only reads systematics for processes labelled with background.
+
+
+        The function creates final data structure of the samples attribute for this Reader class, as:
+        self.samples = { 'sample_name_1': sample_object,
+                         'sample_name_2': sample_object, ... } 
+
+        Each sample object contains a "systematics" attribute, which is another dictionary with structure:
+
+        sample.systematics = {'syst_1_name': syst_object, 'syst_2_name': syst_object } 
+         
+        where each syst_object includes both up/down frames for a single source of systematic variation.
         """
 
-        syst_df_map = {}
-
-        if self.options.concat_years: 
-            for sample_obj in self.samples.values():
-                if sample_obj.label=='background':
-                  if sample_obj.sample_set not in syst_df_map.keys(): syst_df_map[sample_obj.sample_set] = {}
-                  for syst in self.systematics.keys():
-                      syst_df_map[sample_obj.sample_set][syst+'Up']   = []
-                      syst_df_map[sample_obj.sample_set][syst+'Down'] = []
-        else: #use the actual sample key rather than the key for the sample_set/process as in above
-            for sample_obj in self.samples.values():
-                if sample_obj.label=='background':
-                    for syst in self.systematics.keys():
-                        syst_df_map[sample_obj.name][syst+'Up']   = pd.DataFrame()
-                        syst_df_map[sample_obj.name][syst+'Down'] = pd.DataFrame()
+        for sample_obj in self.samples.values():
+            if sample_obj.label=='background':
+                for syst in self.syst_tree_name_map.keys():
+                    sample_obj.systematics[syst] = Systematic(syst, self.syst_tree_name_map[syst][0], self.syst_tree_name_map[syst][1])
 
         for sample_name, sample_obj in self.samples.iteritems():
             if sample_obj.label=='background':
                 input_file = upr.open( '%s/%s%s' % (sample_obj.file_path, sample_obj.name, sample_obj.file_ext) )
-                for syst, syst_obj in self.systematics.iteritems():
+                for syst, syst_obj in sample_obj.systematics.iteritems():
                     print 'reading systematic %s for sample %s' %(sample_name, syst)
                     up_tree            = input_file[syst_obj.up_tree]
                     up_df              = up_tree.pandas.df(self.var_names+['weight'])
                     up_df['weight']    *= float(sample_obj.lumi) 
-
                     if len(self.options.reweight_var)!=0: 
                         up_df = self.apply_reweighting( self.options.reweight_var,
                                                         self.rew_scale_factors, 
                                                         self.rew_bin_edges,
                                                         up_df)
                     else: up_df['weight'] *= float(sample_obj.scale)
-
-                    if self.options.concat_years:
-                        syst_df_map[sample_obj.sample_set][syst+'Up'].append(up_df)
-                    else:
-                        syst_df_map[sample_obj.name][syst+'Up'] = up_df
-
+                    syst_obj.up_frame = up_df
 
                     down_tree          = input_file[syst_obj.down_tree]
                     down_df            = down_tree.pandas.df(self.var_names+['weight'])
@@ -319,18 +299,55 @@ class Plotter(object):
                                                          self.rew_bin_edges,
                                                          down_df)
                     else: down_df['weight'] *= float(sample_obj.scale)
+                    syst_obj.down_frame = down_df
 
-                    if self.options.concat_years:
-                        syst_df_map[sample_obj.sample_set][syst+'Down'].append(down_df)
-                    else:
-                        syst_df_map[sample_obj.name][syst+'Down'] = down_df
 
-        if self.options.concat_years: 
-            for sample_set_name, syst_dict in syst_df_map.iteritems():
-                for syst_name, syst_list  in syst_dict.iteritems():
-                    syst_df_map[sample_set_name][syst_name] = pd.concat(syst_list)
+        #idea here, to account for merging systematics, is to loop through nominal sample objects
+        # get the systematics for each, and concat across sample sets. This is done by putting the indiidual
+        #sample object in nested dictioanries, concatting, then re-filling the Plotter.samples attribute with
+        # a new sample object for each set, taking care to delete the individual ones
 
-        self.syst_df_map = syst_df_map
+        if self.options.concat_years:
+            # set up dict to hold indiv dataframes for sets corresponding to "background" sample types
+            set_to_syst_map = {}
+            for sample_obj in self.samples.values(): 
+                    if (sample_obj.label=='background') and (sample_obj.sample_set not in set_to_syst_map.keys()):
+                        set_to_syst_map[sample_obj.sample_set] = {} #systematics dict for each set
+                        for syst in self.syst_tree_name_map.keys():
+                            set_to_syst_map[sample_obj.sample_set][syst+'Up'] = []
+                            set_to_syst_map[sample_obj.sample_set][syst+'Down'] = []
+
+            #fill data frames lists based off sample sets
+            for sample_obj in self.samples.values():
+                if sample_obj.label=='background':
+                    for syst in self.syst_tree_name_map.keys():
+                        set_to_syst_map[sample_obj.sample_set][syst+'Down'].append( sample_obj.systematics[syst].down_frame )
+                        set_to_syst_map[sample_obj.sample_set][syst+'Up'].append( sample_obj.systematics[syst].up_frame )
+                    del self.samples[sample_obj.name]
+
+            #concat the list of df's for each systematic i.e. merge across years and put into a new systematic object
+            for set_name, syst_dict in set_to_syst_map.iteritems():
+                #only bkg objects in the dict atm so can set label to background
+                set_object = Sample(set_name)
+                set_object.label = 'background'
+                for syst in self.syst_tree_name_map.keys():
+                    set_object.systematics[syst] = Systematic(syst)
+                    set_object.systematics[syst].down_frame = pd.concat(syst_dict[syst+'Down'])
+                    set_object.systematics[syst].up_frame = pd.concat(syst_dict[syst+'Up'])
+
+                self.samples[set_name] = set_object
+
+    #so the final data structure of the samples attribute for this Reader class is:
+    #self.samples = { 'sample_name_1': sample_object },
+    #                 'sample_name_2': sample_object } 
+
+    #the sample object contains an "systematics" attribute, which is a dictionary with structure:
+
+    #FIXME: can maybe merge sample objects before r
+    #sample.systematics = {'syst_1_name': syst_object, 'syst_2_name': syst_object } 
+     
+    # where each syst_object includes both up/down frames for a single source of systematic variation
+    # and may be merged across years if specified (i.e. sample-> set where both are a Sample() object )
 
     #--------------------------------------------------------------
 
@@ -362,7 +379,7 @@ class Plotter(object):
         if len(self.bkg_df_map) != 0: 
             self.plot_bkgs(cut_string, axes, variable, bins, data_binned, bin_centres, data_stat_down_up)
 
-        if len( self.syst_df_map) != 0: 
+        if len(self.syst_tree_name_map.keys()) != 0: 
             self.plot_systematics(cut_string, axes, variable, bins)
 
         #default axes dont have enough whitespace above plots, so add more. 
@@ -378,7 +395,6 @@ class Plotter(object):
         else: axes.set_ylim(top= canv_top*1.25)
 
         fig.savefig('%s/%s.pdf' % (self.output_dir, variable.name))
-        
 
     #--------------------------------------------------------------------
 
@@ -544,80 +560,131 @@ class Plotter(object):
 
     def plot_systematics(self, cut_string, axes, variable, bins):
 
-        #set up dict keys
-        true_syst_variations = {}
-        print 'DEBUG'
-        for proc, syst_dicts  in self.syst_df_map.iteritems():
-          for syst_name in syst_dicts.keys():
-            print 'sumW for systematic: %s '%syst_name
-            test_df = self.syst_df_map[proc][syst_name].query(cut_string)
-            print np.sum(test_df['weight'])
-        print 'END DEBUG'
+        #the systematics info can be accessed through the self.samples object which has format:
 
-        for proc, syst_dicts in self.syst_df_map.iteritems():
-            true_syst_variations[proc] = {}
-             
-            for syst_name, syst_df in syst_dicts.iteritems():
-                syst_df_cut = syst_df.query(cut_string)
+        #self.samples = { 'sample_name_1': sample_object },
+        #                 'sample_name_2': sample_object } 
 
-                var_to_plot     = syst_df_cut[variable.name].values
-                weight          = syst_df_cut['weight'].values
-                isyst_binned, _ = np.histogram(var_to_plot, bins=bins, weights=weight)
-                #compare variation to the nominal for given sample and fill bin list
-                #can probably do using numpy and not loop through the arrays i.e. arr1>arr2 mask and then fill
-                true_up_variations    = []
-                true_down_variations  = []
+        #the sample object contains an "systematics" attribute, which, if we are reading a backgroud sample,
+        # is a dictionary with structure:
 
-                #compare the systematic change to the nominal bin entries for that proc.
+        #sample.systematics = {'syst_1_name': syst_object, 'syst_2_name': syst_object } 
 
-                for ybin_syst, ybin_nominal in zip(isyst_binned, self.mc_totals[proc]):
-                  if ybin_syst > ybin_nominal: 
-                    true_up_variations.append(ybin_syst - ybin_nominal)
-                    true_down_variations.append(0)
-                  elif ybin_syst < ybin_nominal:
-                    true_down_variations.append(ybin_syst - ybin_nominal)
-                    true_up_variations.append(0)
-                  else: #sometimes in low stat cases we get no change either way wrt nominal
-                    true_up_variations.append(0)
-                    true_down_variations.append(0)
-                true_syst_variations[proc][syst_name] = [np.asarray(true_down_variations),
+        print 'sample dict for the reader class is'
+        print self.samples
+
+        for sample, sample_obj in self.samples.iteritems():
+            print 'sample is: %s   ' %sample
+            print 'sample label: %s' %sample_obj.label
+            if sample_obj.label == 'background':
+                for syst_name, syst_obj in sample_obj.systematics.iteritems():
+                    print 'syst: %s' % syst_name
+                    both_syst_frames = {}
+                    both_syst_frames['Down'] = syst_obj.down_frame.query(cut_string)
+                    both_syst_frames['Up']   = syst_obj.up_frame.query(cut_string)
+                     
+                    for syst_type, i_frame in both_syst_frames.iteritems():
+                        var_to_plot      = i_frame[variable.name].values
+                        weight           = i_frame['weight'].values
+                        i_syst_binned, _ = np.histogram(var_to_plot, bins=bins, weights=weight)
+                        #compare variation to the nominal for given sample and fill bin list
+                        #can probably do using numpy and not loop through the arrays i.e. arr1>arr2 mask and then fill
+                        true_up_variations    = []
+                        true_down_variations  = []
+
+                        #compare the systematic change to the nominal bin entries for that proc.
+                        for ybin_syst, ybin_nominal in zip(i_syst_binned, self.mc_totals[sample]):
+                          if ybin_syst > ybin_nominal: 
+                            true_up_variations.append(ybin_syst - ybin_nominal)
+                            true_down_variations.append(0)
+                          elif ybin_syst < ybin_nominal:
+                            true_down_variations.append(ybin_nominal - ybin_syst)
+                            true_up_variations.append(0)
+                          else: #sometimes in low stat cases we get no change either way wrt nominal
+                            true_up_variations.append(0)
+                            true_down_variations.append(0)
+                        print
+                        print 'DEBUG: PART A'
+                        print 'nominal variations'
+                        print self.mc_totals[sample]
+                        print 'true up variations'
+                        print true_up_variations
+                        print 'true down variations'
+                        print true_down_variations
+                        print
+                          
+
+                        #FIX: we need a new atriibute for the syst class linking the true fluctuations
+                        #FIX: with the name and syst type (up/down) of the tree e.g. :
+ 
+                        # systematic.up_tree_binned:   [true_down, true_up]
+                        # systematic.down_tree_binned: [true_down, true_up]
+                     
+                        # because EACH up/down tree has its own true_up and true_down flucs associated to it
+                        # i.e. we can't just make a single true_up/true_down inclusively for a given syst
+                         
+                        if syst_type=='Down':
+                            syst_obj.down_tree_binned = [np.asarray(true_down_variations), 
                                                          np.asarray(true_up_variations)]
-        
-        #add all the up/down variations (separately)for each systematic in quadrature for each bin, 
-        #for each proc
-        summed_true_syst_variations = {}
-        for proc, systdict_to_downuplist in true_syst_variations.iteritems():
-            down_squares = [] 
-            up_squares   = [] 
-            for syst, down_up_list in systdict_to_downuplist.iteritems():
-                down_squares.append( down_up_list[0]**2 )
-                up_squares.append( down_up_list[1]**2 )
-            #now add up the each bin that has been squared (will add element wise since np array, not list :) )
-            syst_merged_downs = np.zeros(len(down_up_list[0]))
-            syst_merged_ups   = np.zeros(len(down_up_list[1]))
-            for down_array in down_squares:
-              syst_merged_downs += down_array
-            for up_array in up_squares:
-              syst_merged_ups   += up_array
-            summed_true_syst_variations[proc] = [np.sqrt(syst_merged_downs), np.sqrt(syst_merged_ups)]
+                        else:
+                            syst_obj.up_tree_binned   = [np.asarray(true_down_variations), 
+                                                         np.asarray(true_up_variations)]
 
+        #add all the up/down variations (separately) for each systematic in quadrature for each bin, 
+        #for each proc (not adding procs together yet though
 
-        syst_plus_stat_variations = {}
-        for proc, syst_merged_down_up_list in summed_true_syst_variations.iteritems():
-          syst_plus_stat_variations[proc] = []
-          syst_plus_stat_variations[proc].append( np.sqrt( syst_merged_down_up_list[0]**2 + self.mc_stat_uncs[proc][0]**2) )
-          syst_plus_stat_variations[proc].append( np.sqrt( syst_merged_down_up_list[1]**2 + self.mc_stat_uncs[proc][1]**2) )
+        for sample, sample_obj in self.samples.iteritems():
+            if sample_obj.label == 'background':
+                down_squares = [] 
+                up_squares   = [] 
+
+                for syst_name, syst_obj in sample_obj.systematics.iteritems():
+                    down_squares.append( syst_obj.down_tree_binned[0]**2 )
+                    down_squares.append( syst_obj.up_tree_binned[0]**2 )
+
+                    up_squares.append( syst_obj.down_tree_binned[1]**2 )
+                    up_squares.append( syst_obj.up_tree_binned[1]**2 )
+
+                #now add up the each bin that has been squared (will add element wise since np array)
+                syst_merged_downs = np.zeros(len(bins)-1)
+                syst_merged_ups   = np.zeros(len(bins)-1)
+
+                for down_array in down_squares:
+                    syst_merged_downs += down_array
+                for up_array in up_squares:
+                    syst_merged_ups   += up_array
+
+                #clear individual background systematic entries and merge create new object merged across systs
+                sample_obj.systematics.clear()
+                merged_syst_obj = Systematic('merged_systs')
+
+                #combined with correpsonding stat error. note that if we are considering a sample set, the name and set attributes are identical now
+                #NOTE: syst have already been squared above in prep for this step!
+                syst_merged_downs = np.sqrt( syst_merged_downs + self.mc_stat_uncs[sample_obj.name][0]**2) 
+                syst_merged_ups   = np.sqrt( syst_merged_ups   + self.mc_stat_uncs[sample_obj.name][1]**2) 
+
+                merged_syst_obj.merged_syst_stat_down  = syst_merged_downs
+                merged_syst_obj.merged_syst_stat_up    = syst_merged_ups
+                sample_obj.systematics['merged_systs'] = merged_syst_obj 
+
             
-        #4) merged==across procs i.e. stacked
-        #FIXME: only do this is we have more than 1 proc i.e. merge systs across procks
-        merged_downs = np.zeros(len(syst_merged_down_up_list[0]))
-        merged_ups   = np.zeros(len(syst_merged_down_up_list[1]))
-        for total_up_down_list in syst_plus_stat_variations.values():
-          merged_downs += total_up_down_list[0]**2
-          merged_ups   += total_up_down_list[1]**2
+        #4) merge systs (already merged across systs) across procs
+        
+        merged_downs = np.zeros(len(bins)-1)
+        merged_ups   = np.zeros(len(bins)-1)
+        for sample, sample_obj in self.samples.iteritems():
+            if sample_obj.label == 'background':
+                merged_downs += (sample_obj.systematics['merged_systs'].merged_syst_stat_down)**2
+                merged_ups   += (sample_obj.systematics['merged_systs'].merged_syst_stat_up)**2
+
             
         final_down = np.sqrt(merged_downs)
         final_up = np.sqrt(merged_ups)
+
+        print 'final downs:'
+        print final_down      
+        print 'final ups:'
+        print final_up      
             
         print 'finished computing systematics'
         print 
@@ -626,9 +693,13 @@ class Plotter(object):
         if self.options.ratio_plot:
             ratio_canv  = axes[1]
             axes        = axes[0] 
+
         total_mc = np.zeros(len(bins)-1) # n_bins = n_bin_edges -1 
         for sumw in self.mc_totals.values():
           total_mc += sumw
+
+        print 'summed mc'
+        print total_mc
 
         up_yield   = total_mc + final_up
         #FIXME: fix this niche issue below with poiss err function
@@ -641,7 +712,6 @@ class Plotter(object):
           sigma_tot_ratio_down = final_down/total_mc
                   
           #NOTE:below is for error in ratio (i.e. including error in data propped into ratio ratio that kept sep)
-
           ratio_up_excess      = np.ones(len(total_mc)) + sigma_tot_ratio_up
           ratio_down_excess    = np.ones(len(total_mc)) - sigma_tot_ratio_down
                   
@@ -652,6 +722,7 @@ class Plotter(object):
           #   to the filled numbers to 1, such that error on the closest filled value
           #   doesn't mysteriously disappear
           #EDIT: gave up and did this dumb fix:
+
           ratio_up_excess[ratio_up_excess==np.inf] = 1 
           ratio_down_excess = np.nan_to_num(ratio_down_excess)
           ratio_down_excess[ratio_down_excess==0] =1
@@ -726,7 +797,6 @@ class Plotter(object):
 
     def draw_tot_error_band(self):
         pass
-        #should take syst and stat
 
     #--------------------------------------------------------------
     def draw_stat_error_band(self):
@@ -785,8 +855,4 @@ class trackStatError():
 
     def __init__(self):
         pass
-
-
-   
-
 

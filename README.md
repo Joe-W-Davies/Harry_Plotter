@@ -31,3 +31,11 @@ This is still under development but will hopefully include:
 
 * Output figures generated with ROOT
 
+
+## open issues
+* would be nice to synchronise the samples attribute of the Reader class such that it handles the sig and data in the same way it handles the bkgs
+    * i.e. can have a sample object for each signal and data sample, and do the plotting by looping through these objects. Functionality is there for signal, but we just just rely on nested dictionaries at the moment
+
+
+### other notes
+* there is no reason to make a searate class for bkg MC. We can just use instances of the Sample class, and fill the {systematics} attribute with systematic objects. For data and signal, we just leave this systematic attribute empty
